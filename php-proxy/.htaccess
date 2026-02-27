@@ -1,0 +1,5 @@
+RewriteEngine On
+
+# Ensure /api/voalle/* hits the PHP proxy
+RewriteRule ^api/voalle/?$ api/voalle/index.php [L]
+RewriteRule ^api/voalle/(.*)$ api/voalle/index.php [L]

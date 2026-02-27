@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com;
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: https:;
+        font-src 'self' data:;
+        connect-src
+          'self'
+          http://localhost:3000
+          ws://localhost:3000
+          http://localhost:5173
+          ws://localhost:5173
+          https://*.supabase.co
+          https://www.google-analytics.com;
+        frame-ancestors 'none';
+        base-uri 'self';
+      "
+    />
+
+    <link
+      rel="icon"
+      type="image/png"
+      href="https://horizons-cdn.hostinger.com/b643c455-4dba-4a09-b9e7-84de446a2668/8d59e3ef48052662cbf791dd63b9ba04.png"
+    />
+
+    <meta name="generator" content="Hostinger Horizons" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>CotaFacil</title>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
