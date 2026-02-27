@@ -11,19 +11,11 @@ import {
 } from "@/components/ui/select";
 import { useData } from "@/contexts/SupabaseDataContext";
 import { useToast } from "@/components/ui/use-toast";
-import { Save, PlusCircle, Building, FileDown, User, UserSquare } from "lucide-react";
+import { Save, Building, FileDown, User, Users2, UserSquare } from "lucide-react";
 import QuoteItemsManager from "@/components/quotes/QuoteItemsManager";
 import QuoteNotes from "@/components/quotes/QuoteNotes";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import QuoteTotals from "@/components/quotes/QuoteTotals";
-import ClientForm from "@/components/clients/ClientForm";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { generateQuotePDF } from "@/lib/pdfGenerator";
 import QuotePDFPreviewDialog from "@/components/quotes/QuotePDFPreviewDialog";
 import { Input } from "@/components/ui/input";
@@ -65,7 +57,6 @@ function formatClientLabel(c) {
 export default function QuoteFormPage() {
   const {
     clients,
-    addClient,
     quotes,
     addQuote,
     companies,
@@ -75,8 +66,7 @@ export default function QuoteFormPage() {
     sellers: supabaseSellers, // fallback
   } = useData();
 
-  // ⚠️ IMPORTANTE: seu useAuth aqui precisa devolver o user do BFF (me) no campo "user"
-  // Ex.: {sub,email,role,name}
+  // user do BFF (me)
   const { user: bffUser } = useAuth();
 
   const { toast } = useToast();
@@ -116,8 +106,13 @@ export default function QuoteFormPage() {
     user_id: "",
   });
 
-  const [isClientDialogOpen, setIsClientDialogOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // ✅ NOVO: ir para lista de clientes e voltar para a cotação
+  const handleGoSelectClient = () => {
+    const returnTo = `${location.pathname}${location.search || ""}`;
+    navigate(`/clientes?returnTo=${encodeURIComponent(returnTo)}`);
+  };
 
   // ✅ carrega vendedores do BFF
   useEffect(() => {
@@ -265,19 +260,6 @@ export default function QuoteFormPage() {
             : (selected.name || selected.nome_razao || ""),
         }));
       }
-    }
-  };
-
-  const handleSaveNewClient = async (clientData) => {
-    try {
-      const newClient = await addClient(clientData);
-      if (newClient) {
-        toast({ title: "Cliente cadastrado!", description: "Novo cliente foi adicionado ao sistema." });
-        handleSelectChange("client_id", newClient.id);
-        setIsClientDialogOpen(false);
-      }
-    } catch {
-      // tratado no contexto
     }
   };
 
@@ -531,22 +513,18 @@ export default function QuoteFormPage() {
                 </SelectContent>
               </Select>
 
-              <Dialog open={isClientDialogOpen} onOpenChange={setIsClientDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button type="button" size="icon" className="btn-secondary flex-shrink-0">
-                    <PlusCircle className="w-4 h-4" />
-                  </Button>
-                </DialogTrigger>
-
-                <DialogContent className="glass-effect border-white/20 text-white max-w-5xl">
-                  <DialogHeader>
-                    <DialogTitle className="text-white">Novo Cliente</DialogTitle>
-                  </DialogHeader>
-                  <div className="max-h-[70vh] overflow-y-auto p-1">
-                    <ClientForm onSave={handleSaveNewClient} onCancel={() => setIsClientDialogOpen(false)} />
-                  </div>
-                </DialogContent>
-              </Dialog>
+              {/* ✅ TROCA DO BOTÃO:
+                  antes: PlusCircle + Dialog (novo cliente)
+                  agora: Selecionar Cliente (vai para /clientes e volta) */}
+              <Button
+                type="button"
+                className="btn-secondary flex-shrink-0"
+                onClick={handleGoSelectClient}
+                title="Selecionar cliente"
+              >
+                <Users2 className="w-4 h-4 mr-2" />
+                Selecionar
+              </Button>
             </div>
           </div>
 
@@ -560,9 +538,7 @@ export default function QuoteFormPage() {
               <SelectTrigger className="input-field">
                 <UserSquare className="w-4 h-4 mr-2 opacity-60" />
                 <SelectValue
-                  placeholder={
-                    loadingSellers ? "Carregando vendedores..." : "Selecione o vendedor"
-                  }
+                  placeholder={loadingSellers ? "Carregando vendedores..." : "Selecione o vendedor"}
                 />
               </SelectTrigger>
 
@@ -574,9 +550,7 @@ export default function QuoteFormPage() {
                 ))}
 
                 {sellersSelectList.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-white/60">
-                    Nenhum vendedor disponível.
-                  </div>
+                  <div className="px-3 py-2 text-xs text-white/60">Nenhum vendedor disponível.</div>
                 )}
               </SelectContent>
             </Select>

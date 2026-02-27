@@ -3,6 +3,7 @@ import { Helmet } from "react-helmet";
 import { motion, AnimatePresence } from "framer-motion";
 import { Users2, Plus, Search, Loader2, RefreshCcw } from "lucide-react";
 import { useData } from "@/contexts/SupabaseDataContext";
+import { useAuth } from "@/contexts/SupabaseAuthContext";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,9 +26,14 @@ async function syncClientesDb(pageSize = 5000) {
 
 const Clients = () => {
   const { deleteClient } = useData();
+  const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // ✅ Role: admin vê "Novo Cliente"; vendedor não vê
+  const role = user?.role || user?.user_metadata?.role || "seller";
+  const isSeller = role !== "admin";
 
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,7 +48,7 @@ const Clients = () => {
         ...c,
         fantasia: c.fantasia ?? c.nome_fantasia ?? "",
         cpf_cnpj: c.cpf_cnpj ?? "",
-        nome_razao: c.nome_razao ?? ""
+        nome_razao: c.nome_razao ?? "",
       }));
       setDbClients(adapted);
     } catch (e) {
@@ -51,7 +57,10 @@ const Clients = () => {
       toast({
         variant: "destructive",
         title: "Erro ao buscar clientes",
-        description: e?.response?.data?.error || e?.message || "Falha ao consultar a base local (BFF)."
+        description:
+          e?.response?.data?.error ||
+          e?.message ||
+          "Falha ao consultar a base local (BFF).",
       });
     } finally {
       setLoading(false);
@@ -88,7 +97,7 @@ const Clients = () => {
       const data = await syncClientesDb(5000);
       toast({
         title: "Base do Voalle atualizada!",
-        description: `Sincronizados: ${data?.total ?? 0} clientes`
+        description: `Sincronizados: ${data?.total ?? 0} clientes`,
       });
       await loadClients(searchTerm);
     } catch (e) {
@@ -96,7 +105,10 @@ const Clients = () => {
       toast({
         variant: "destructive",
         title: "Erro ao atualizar base",
-        description: e?.response?.data?.error || e?.message || "Falha ao sincronizar com o Voalle."
+        description:
+          e?.response?.data?.error ||
+          e?.message ||
+          "Falha ao sincronizar com o Voalle.",
       });
     } finally {
       setSyncing(false);
@@ -146,9 +158,12 @@ const Clients = () => {
                 )}
               </Button>
 
-              <Button className="btn-primary" onClick={() => navigate("/clientes/novo")}>
-                <Plus className="w-4 h-4 mr-2" /> Novo Cliente
-              </Button>
+              {/* 🔒 SOMENTE ADMIN VÊ */}
+              {!isSeller && (
+                <Button className="btn-primary" onClick={() => navigate("/clientes/novo")}>
+                  <Plus className="w-4 h-4 mr-2" /> Novo Cliente
+                </Button>
+              )}
             </div>
           </div>
         </motion.div>
@@ -191,7 +206,13 @@ const Clients = () => {
           <div className="text-center py-16 text-slate-500 col-span-full">
             <Users2 className="w-16 h-16 mx-auto mb-4" />
             <h3 className="text-xl font-semibold">Nenhum cliente encontrado</h3>
-            <p>Tente ajustar sua busca ou adicione um novo cliente.</p>
+
+            {/* ✅ evita sugerir “adicionar” para vendedor */}
+            {!isSeller ? (
+              <p>Tente ajustar sua busca ou adicione um novo cliente.</p>
+            ) : (
+              <p>Tente ajustar sua busca.</p>
+            )}
           </div>
         )}
       </div>
