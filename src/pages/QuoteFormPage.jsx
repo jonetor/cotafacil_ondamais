@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { useData } from "@/contexts/SupabaseDataContext";
 import { useToast } from "@/components/ui/use-toast";
-import { Save, Building, FileDown, User, Users2, UserSquare } from "lucide-react";
+import { Save, Building, FileDown, User, UserSquare, Users2 } from "lucide-react";
 import QuoteItemsManager from "@/components/quotes/QuoteItemsManager";
 import QuoteNotes from "@/components/quotes/QuoteNotes";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
@@ -57,6 +57,7 @@ function formatClientLabel(c) {
 export default function QuoteFormPage() {
   const {
     clients,
+    addClient, // (mantém aqui para não quebrar caso o contexto espere, mas não usamos no botão)
     quotes,
     addQuote,
     companies,
@@ -66,7 +67,7 @@ export default function QuoteFormPage() {
     sellers: supabaseSellers, // fallback
   } = useData();
 
-  // user do BFF (me)
+  // ✅ BFF user esperado: { sub, email, role, name }
   const { user: bffUser } = useAuth();
 
   const { toast } = useToast();
@@ -108,12 +109,6 @@ export default function QuoteFormPage() {
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  // ✅ NOVO: ir para lista de clientes e voltar para a cotação
-  const handleGoSelectClient = () => {
-    const returnTo = `${location.pathname}${location.search || ""}`;
-    navigate(`/clientes?returnTo=${encodeURIComponent(returnTo)}`);
-  };
-
   // ✅ carrega vendedores do BFF
   useEffect(() => {
     (async () => {
@@ -121,8 +116,6 @@ export default function QuoteFormPage() {
         setLoadingSellers(true);
         const list = await listSellers(); // SEMPRE array
         setBffSellers(list);
-
-        console.log("[QuoteFormPage] bff sellers:", list);
       } catch (e) {
         console.error("[QuoteFormPage] erro listSellers:", e);
         setBffSellers([]);
@@ -263,6 +256,12 @@ export default function QuoteFormPage() {
     }
   };
 
+  // ✅ Selecionar cliente: vai para /clientes e volta para a cotação
+  const handleSelectClient = () => {
+    const returnTo = `${location.pathname}${location.search || ""}`;
+    navigate(`/clientes?returnTo=${encodeURIComponent(returnTo)}`);
+  };
+
   const productItems = useMemo(
     () => (Array.isArray(currentQuote.items) ? currentQuote.items : []).filter((i) => i.item_type === "PRODUTO"),
     [currentQuote.items]
@@ -359,16 +358,38 @@ export default function QuoteFormPage() {
     externalCompanyOption,
   ]);
 
-  const handleGeneratePDF = () => {
-    if (!pdfPreviewData.company || !pdfPreviewData.client || !pdfPreviewData.autor || !pdfPreviewData.vendedor) {
+  // ✅ IMPORTANTE:
+  // - "opções de PDF" devem aparecer dentro do QuotePDFPreviewDialog (se ele já tem isso)
+  // - então o botão só precisa abrir o modal.
+  const handleOpenPreview = () => {
+    if (!currentQuote.client_id) {
       toast({
         variant: "destructive",
-        title: "Dados incompletos",
-        description: "Selecione empresa, cliente e vendedor para gerar o PDF.",
+        title: "Selecione um cliente",
+        description: "Escolha um cliente antes de gerar o PDF.",
       });
       return;
     }
-    generateQuotePDF(pdfPreviewData);
+    setIsPreviewOpen(true);
+  };
+
+  // ✅ Confirmar no modal → gera PDF
+  // Aceita (template) se o seu dialog passar (Orçamento / Proposta)
+  const handleGeneratePDF = (template) => {
+    // não trava por autor: deixa gerar mesmo sem autor
+    if (!pdfPreviewData.company || !pdfPreviewData.client) {
+      toast({
+        variant: "destructive",
+        title: "Dados incompletos",
+        description: "Selecione empresa e cliente para gerar o PDF.",
+      });
+      return;
+    }
+
+    generateQuotePDF({
+      ...pdfPreviewData,
+      template, // se o pdfGenerator aceitar, ótimo; se não aceitar, ele ignora.
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -435,6 +456,11 @@ export default function QuoteFormPage() {
     }
   };
 
+  // ✅ LIBERAÇÃO DO BOTÃO:
+  // não depende de company_id (pq pode demorar pra carregar),
+  // só precisa ter cliente selecionado.
+  const canOpenPdf = Boolean(String(currentQuote.client_id || "").trim());
+
   return (
     <div className="space-y-6">
       <motion.form
@@ -458,8 +484,9 @@ export default function QuoteFormPage() {
               type="button"
               variant="outline"
               className="btn-secondary"
-              onClick={() => setIsPreviewOpen(true)}
-              disabled={!currentQuote.company_id || !currentQuote.client_id}
+              onClick={handleOpenPreview}
+              disabled={!canOpenPdf}
+              title={!canOpenPdf ? "Selecione um cliente para gerar o PDF" : "Gerar PDF"}
             >
               <FileDown className="w-4 h-4 mr-2" />
               Gerar PDF
@@ -513,14 +540,13 @@ export default function QuoteFormPage() {
                 </SelectContent>
               </Select>
 
-              {/* ✅ TROCA DO BOTÃO:
-                  antes: PlusCircle + Dialog (novo cliente)
-                  agora: Selecionar Cliente (vai para /clientes e volta) */}
+              {/* ✅ Troca “Novo Cliente” por “Selecionar” */}
               <Button
                 type="button"
+                variant="secondary"
                 className="btn-secondary flex-shrink-0"
-                onClick={handleGoSelectClient}
-                title="Selecionar cliente"
+                onClick={handleSelectClient}
+                title="Selecionar cliente no módulo Clientes e voltar para esta cotação"
               >
                 <Users2 className="w-4 h-4 mr-2" />
                 Selecionar
@@ -550,7 +576,9 @@ export default function QuoteFormPage() {
                 ))}
 
                 {sellersSelectList.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-white/60">Nenhum vendedor disponível.</div>
+                  <div className="px-3 py-2 text-xs text-white/60">
+                    Nenhum vendedor disponível.
+                  </div>
                 )}
               </SelectContent>
             </Select>
@@ -589,6 +617,7 @@ export default function QuoteFormPage() {
         </div>
       </motion.form>
 
+      {/* ✅ Modal (onde ficam as opções de modelo, se o seu dialog tiver) */}
       <QuotePDFPreviewDialog
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}

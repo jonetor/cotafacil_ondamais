@@ -35,6 +35,7 @@ import NFePage from "@/pages/NFePage";
 import ApiIntegrationPage from "@/pages/ApiIntegrationPage";
 import OrcamentoItens from "@/pages/OrcamentoItens";
 import CreateSellerPage from "@/pages/CreateSellerPage";
+import ProfilePage from "@/pages/ProfilePage";
 
 // ✅ página do orçamento
 import NovoOrcamento from "@/pages/NovoOrcamento";
@@ -158,6 +159,7 @@ function AppRoutes() {
         <Route path="fiscal/calculo" element={<CalculoFiscalPage />} />
         <Route path="fiscal/nfe" element={<NFePage />} />
         <Route path="usuarios/novo-vendedor" element={<CreateSellerPage />} />
+        <Route path="/perfil" element={<ProfilePage />} />
       </Route>
 
       {/* ===== Fallback: qualquer rota desconhecida ===== */}
