@@ -1,256 +1,447 @@
-// bff-node/api/quotes.js
 import express from "express";
 import crypto from "node:crypto";
-import { getQuotesDb } from "../quotesDb.js";
+import { db } from "../db.js";
 
 const router = express.Router();
 
-const nowIso = () => new Date().toISOString();
-const genId = () => crypto.randomUUID();
+/* ===============================
+   CRIA TABELAS BASE (sem proposal_number ainda, para evitar erro em banco antigo)
+================================ */
 
-function asNumber(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+db.exec(`
+CREATE TABLE IF NOT EXISTS quotes (
+  id TEXT PRIMARY KEY,
+  client_id TEXT,
+  client_name TEXT,
+  status TEXT DEFAULT 'pending',
+
+  subtotal REAL DEFAULT 0,
+  tax_total REAL DEFAULT 0,
+  discount_total REAL DEFAULT 0,
+  total_value REAL DEFAULT 0,
+
+  created_at INTEGER,
+  updated_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS quote_items (
+  id TEXT PRIMARY KEY,
+  quote_id TEXT,
+  product_id TEXT,
+  code TEXT,
+  description TEXT,
+  unit TEXT,
+  quantity REAL,
+  unit_price REAL,
+  total_price REAL,
+  icms REAL DEFAULT 0,
+  issqn REAL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_quote_items_quote
+ON quote_items(quote_id);
+`);
+
+/* ===============================
+   MIGRAÇÃO DEFENSIVA: proposal_number
+   (depois que a tabela existe)
+================================ */
+
+function hasColumn(table, col) {
+  const cols = db.prepare(`PRAGMA table_info('${table}')`).all();
+  return cols.some((c) => c.name === col);
 }
 
-function parseTaxesJson(s) {
-  try {
-    return s ? JSON.parse(s) : {};
-  } catch {
-    return {};
+// ✅ adiciona proposal_number se faltar
+if (!hasColumn("quotes", "proposal_number")) {
+  db.exec(`ALTER TABLE quotes ADD COLUMN proposal_number TEXT`);
+}
+
+// ✅ índice só depois da coluna existir
+db.exec(`CREATE INDEX IF NOT EXISTS idx_quotes_proposal_number ON quotes(proposal_number)`);
+
+/* ===============================
+   GERA PRÓXIMO NÚMERO DE PROPOSTA
+================================ */
+
+function nextProposalNumber() {
+  const row = db
+    .prepare(`SELECT MAX(CAST(proposal_number AS INTEGER)) AS maxNum FROM quotes`)
+    .get();
+
+  const next = Number(row?.maxNum || 0) + 1;
+  return String(next).padStart(5, "0");
+}
+
+/* ===============================
+   CALCULAR TOTAIS (payload)
+================================ */
+
+function calcTotalsFromPayload(items = []) {
+  let subtotal = 0;
+  let tax = 0;
+
+  for (const item of items) {
+    const qty = Number(item.quantity || 0);
+    const price = Number(item.unit_price || 0);
+
+    const total = qty * price;
+    subtotal += total;
+
+    const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
+    const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
+
+    tax += total * ((icms + issqn) / 100);
   }
+
+  return {
+    subtotal,
+    tax_total: tax,
+    total_value: subtotal + tax,
+  };
 }
 
-function loadQuoteWithItems(db, id) {
-  const q = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
-  if (!q) return null;
+/* ===============================
+   CALCULAR TOTAIS (banco)
+================================ */
 
+function calcTotalsFromDb(quoteId) {
   const items = db
-    .prepare(`SELECT * FROM quote_items WHERE quote_id = ? ORDER BY created_at ASC`)
-    .all(id)
-    .map((it) => ({ ...it, taxes: parseTaxesJson(it.taxes_json) }));
+    .prepare(
+      `
+      SELECT quantity, unit_price, icms, issqn
+      FROM quote_items
+      WHERE quote_id = ?
+    `
+    )
+    .all(quoteId);
 
-  return { ...q, items };
+  let subtotal = 0;
+  let tax = 0;
+
+  for (const item of items) {
+    const qty = Number(item.quantity || 0);
+    const price = Number(item.unit_price || 0);
+
+    const total = qty * price;
+    subtotal += total;
+
+    const icms = Number(item.icms || 0);
+    const issqn = Number(item.issqn || 0);
+
+    tax += total * ((icms + issqn) / 100);
+  }
+
+  return {
+    subtotal,
+    tax_total: tax,
+    total_value: subtotal + tax,
+    itemsCount: items.length,
+  };
 }
+
+/* ===============================
+   LISTAR COTAÇÕES
+================================ */
 
 router.get("/", (req, res) => {
-  try {
-    const db = getQuotesDb();
-    const rows = db.prepare(`SELECT * FROM quotes ORDER BY created_at DESC`).all();
+  const rows = db
+    .prepare(
+      `
+      SELECT *
+      FROM quotes
+      ORDER BY created_at DESC
+    `
+    )
+    .all();
 
-    const itemStmt = db.prepare(
-      `SELECT * FROM quote_items WHERE quote_id = ? ORDER BY created_at ASC`
-    );
-
-    const quotes = rows.map((q) => {
-      const items = itemStmt.all(q.id).map((it) => ({
-        ...it,
-        taxes: parseTaxesJson(it.taxes_json),
-      }));
-      return { ...q, items };
-    });
-
-    res.json(quotes);
-  } catch (e) {
-    console.error("[GET /api/quotes]", e);
-    res.status(500).json({ error: String(e?.message || e) });
-  }
+  res.json(rows);
 });
+
+/* ===============================
+   BUSCAR UMA COTAÇÃO (com itens)
+================================ */
 
 router.get("/:id", (req, res) => {
-  try {
-    const db = getQuotesDb();
-    const data = loadQuoteWithItems(db, req.params.id);
-    if (!data) return res.status(404).json({ error: "Not found" });
-    res.json(data);
-  } catch (e) {
-    console.error("[GET /api/quotes/:id]", e);
-    res.status(500).json({ error: String(e?.message || e) });
+  const id = req.params.id;
+
+  const quote = db
+    .prepare(
+      `
+      SELECT *
+      FROM quotes
+      WHERE id = ?
+    `
+    )
+    .get(id);
+
+  if (!quote) {
+    return res.status(404).json({ error: "Cotação não encontrada" });
   }
+
+  const items = db
+    .prepare(
+      `
+      SELECT *
+      FROM quote_items
+      WHERE quote_id = ?
+      ORDER BY rowid ASC
+    `
+    )
+    .all(id);
+
+  quote.items = items;
+
+  res.json(quote);
 });
 
-function upsertQuoteTx(db, payload) {
-  const quoteId = payload.id || genId();
-  const createdAt = payload.created_at || nowIso();
-  const updatedAt = nowIso();
-  const items = Array.isArray(payload.items) ? payload.items : [];
+/* ===============================
+   CRIAR COTAÇÃO (gera proposal_number)
+================================ */
 
-  const quoteRow = {
-    id: quoteId,
+router.post("/", (req, res) => {
+  const data = req.body || {};
+  const id = crypto.randomUUID();
+  const now = Date.now();
 
-    proposal_number: String(payload.proposal_number || ""),
-    revision: asNumber(payload.revision || 0),
-    status: String(payload.status || "pending"),
+  const items = Array.isArray(data.items) ? data.items : [];
+  const totals = calcTotalsFromPayload(items);
 
-    created_at: createdAt,
-    updated_at: updatedAt,
+  const proposal_number = data.proposal_number
+    ? String(data.proposal_number).padStart(5, "0")
+    : nextProposalNumber();
 
-    user_id: String(payload.user_id || ""),
-    seller_id: String(payload.seller_id || ""),
+  const trx = db.transaction(() => {
+    db.prepare(
+      `
+      INSERT INTO quotes (
+        id,
+        proposal_number,
+        client_id,
+        client_name,
+        status,
+        subtotal,
+        tax_total,
+        total_value,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+    ).run(
+      id,
+      proposal_number,
+      data.client_id || null,
+      data.client_name || "",
+      data.status || "pending",
+      totals.subtotal,
+      totals.tax_total,
+      totals.total_value,
+      now,
+      now
+    );
 
-    company_id: String(payload.company_id || ""),
-    client_id: String(payload.client_id || ""),
+    const insertItem = db.prepare(
+      `
+      INSERT INTO quote_items (
+        id,
+        quote_id,
+        product_id,
+        code,
+        description,
+        unit,
+        quantity,
+        unit_price,
+        total_price,
+        icms,
+        issqn
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+    );
 
-    company_source: String(payload.company_source || "internal"),
-    client_source: String(payload.client_source || "internal"),
-    client_external_id: String(payload.client_external_id || ""),
+    for (const item of items) {
+      const qty = Number(item.quantity || 0);
+      const price = Number(item.unit_price || 0);
 
-    company_name: String(payload.company_name || ""),
-    company_document: String(payload.company_document || ""),
+      const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
+      const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
 
-    client_name: String(payload.client_name || ""),
-    client_document: String(payload.client_document || ""),
-
-    contact_person: String(payload.contact_person || ""),
-
-    validity_date: String(payload.validity_date || ""),
-    payment_terms: String(payload.payment_terms || ""),
-    freight_type: String(payload.freight_type || ""),
-    delivery_location: String(payload.delivery_location || ""),
-    notes: String(payload.notes || ""),
-
-    total_value: asNumber(payload.total_value || 0),
-  };
-
-  const insertOrUpdateQuote = db.prepare(`
-    INSERT INTO quotes (
-      id, proposal_number, revision, status,
-      created_at, updated_at,
-      user_id, seller_id,
-      company_id, client_id,
-      company_source, client_source, client_external_id,
-      company_name, company_document,
-      client_name, client_document,
-      contact_person,
-      validity_date, payment_terms, freight_type, delivery_location, notes,
-      total_value
-    ) VALUES (
-      @id, @proposal_number, @revision, @status,
-      @created_at, @updated_at,
-      @user_id, @seller_id,
-      @company_id, @client_id,
-      @company_source, @client_source, @client_external_id,
-      @company_name, @company_document,
-      @client_name, @client_document,
-      @contact_person,
-      @validity_date, @payment_terms, @freight_type, @delivery_location, @notes,
-      @total_value
-    )
-    ON CONFLICT(id) DO UPDATE SET
-      proposal_number=excluded.proposal_number,
-      revision=excluded.revision,
-      status=excluded.status,
-      updated_at=excluded.updated_at,
-      user_id=excluded.user_id,
-      seller_id=excluded.seller_id,
-      company_id=excluded.company_id,
-      client_id=excluded.client_id,
-      company_source=excluded.company_source,
-      client_source=excluded.client_source,
-      client_external_id=excluded.client_external_id,
-      company_name=excluded.company_name,
-      company_document=excluded.company_document,
-      client_name=excluded.client_name,
-      client_document=excluded.client_document,
-      contact_person=excluded.contact_person,
-      validity_date=excluded.validity_date,
-      payment_terms=excluded.payment_terms,
-      freight_type=excluded.freight_type,
-      delivery_location=excluded.delivery_location,
-      notes=excluded.notes,
-      total_value=excluded.total_value
-  `);
-
-  const deleteItems = db.prepare(`DELETE FROM quote_items WHERE quote_id = ?`);
-
-  const insertItem = db.prepare(`
-    INSERT INTO quote_items (
-      id, quote_id,
-      item_id, item_type,
-      code, description, unit,
-      quantity, unit_price, total_price,
-      taxes_json,
-      created_at, updated_at
-    ) VALUES (
-      @id, @quote_id,
-      @item_id, @item_type,
-      @code, @description, @unit,
-      @quantity, @unit_price, @total_price,
-      @taxes_json,
-      @created_at, @updated_at
-    )
-  `);
-
-  const tx = db.transaction(() => {
-    insertOrUpdateQuote.run(quoteRow);
-    deleteItems.run(quoteId);
-
-    const t = nowIso();
-    for (const it of items) {
-      insertItem.run({
-        id: it.id || genId(),
-        quote_id: quoteId,
-
-        item_id: it.item_id ? String(it.item_id) : "",
-        item_type: String(it.item_type || ""),
-
-        code: String(it.code || ""),
-        description: String(it.description || ""),
-        unit: String(it.unit || ""),
-
-        quantity: asNumber(it.quantity || 0),
-        unit_price: asNumber(it.unit_price || 0),
-        total_price: asNumber(it.total_price || 0),
-
-        taxes_json: JSON.stringify(it.taxes || {}),
-
-        created_at: it.created_at || t,
-        updated_at: t,
-      });
+      insertItem.run(
+        crypto.randomUUID(),
+        id,
+        item.product_id || item.id || null,
+        item.code || "",
+        item.description || "",
+        item.unit || "un",
+        qty,
+        price,
+        qty * price,
+        icms,
+        issqn
+      );
     }
   });
 
-  tx();
-  return quoteId;
-}
+  trx();
 
-router.post("/", (req, res) => {
-  try {
-    const db = getQuotesDb();
-    const payload = req.body || {};
-    const quoteId = upsertQuoteTx(db, payload);
-
-    const saved = loadQuoteWithItems(db, quoteId);
-    res.json(saved);
-  } catch (e) {
-    console.error("[POST /api/quotes]", e);
-    res.status(500).json({ error: String(e?.message || e) });
-  }
+  res.json({ ok: true, id, proposal_number });
 });
+
+/* ===============================
+   ATUALIZAR COTAÇÃO
+================================ */
 
 router.put("/:id", (req, res) => {
-  try {
-    const db = getQuotesDb();
-    const payload = { ...(req.body || {}), id: req.params.id };
-    const quoteId = upsertQuoteTx(db, payload);
+  const id = req.params.id;
+  const data = req.body || {};
+  const now = Date.now();
 
-    const saved = loadQuoteWithItems(db, quoteId);
-    res.json(saved);
+  const items = Array.isArray(data.items) ? data.items : [];
+  const totals = calcTotalsFromPayload(items);
+
+  const trx = db.transaction(() => {
+    const current = db.prepare(`SELECT proposal_number FROM quotes WHERE id=?`).get(id);
+    if (!current) throw new Error("Cotação não encontrada");
+
+    const proposal_number = data.proposal_number
+      ? String(data.proposal_number).padStart(5, "0")
+      : (current.proposal_number || null);
+
+    db.prepare(
+      `
+      UPDATE quotes
+      SET
+        proposal_number = ?,
+        client_id = ?,
+        client_name = ?,
+        subtotal = ?,
+        tax_total = ?,
+        total_value = ?,
+        updated_at = ?
+      WHERE id = ?
+    `
+    ).run(
+      proposal_number,
+      data.client_id || null,
+      data.client_name || "",
+      totals.subtotal,
+      totals.tax_total,
+      totals.total_value,
+      now,
+      id
+    );
+
+    db.prepare(`DELETE FROM quote_items WHERE quote_id = ?`).run(id);
+
+    const insertItem = db.prepare(
+      `
+      INSERT INTO quote_items (
+        id,
+        quote_id,
+        product_id,
+        code,
+        description,
+        unit,
+        quantity,
+        unit_price,
+        total_price,
+        icms,
+        issqn
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+    );
+
+    for (const item of items) {
+      const qty = Number(item.quantity || 0);
+      const price = Number(item.unit_price || 0);
+
+      const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
+      const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
+
+      insertItem.run(
+        crypto.randomUUID(),
+        id,
+        item.product_id || item.id || null,
+        item.code || "",
+        item.description || "",
+        item.unit || "un",
+        qty,
+        price,
+        qty * price,
+        icms,
+        issqn
+      );
+    }
+  });
+
+  try {
+    trx();
+    res.json({ ok: true });
   } catch (e) {
-    console.error("[PUT /api/quotes/:id]", e);
-    res.status(500).json({ error: String(e?.message || e) });
+    res.status(404).json({ error: e?.message || String(e) });
   }
 });
 
-router.delete("/:id", (req, res) => {
+/* ===============================
+   APROVAR COTAÇÃO (não zera)
+================================ */
+
+router.post("/:id/approve", (req, res) => {
+  const id = req.params.id;
+  const now = Date.now();
+
+  const trx = db.transaction(() => {
+    const totals = calcTotalsFromDb(id);
+
+    if (totals.itemsCount === 0) {
+      throw new Error("Cotação não possui itens para aprovar");
+    }
+
+    const result = db
+      .prepare(
+        `
+        UPDATE quotes
+        SET
+          status = 'approved',
+          subtotal = ?,
+          tax_total = ?,
+          total_value = ?,
+          updated_at = ?
+        WHERE id = ?
+      `
+      )
+      .run(totals.subtotal, totals.tax_total, totals.total_value, now, id);
+
+    if (result.changes === 0) {
+      throw new Error("Cotação não encontrada");
+    }
+  });
+
   try {
-    const db = getQuotesDb();
-    db.prepare(`DELETE FROM quotes WHERE id = ?`).run(req.params.id);
+    trx();
     res.json({ ok: true });
   } catch (e) {
-    console.error("[DELETE /api/quotes/:id]", e);
-    res.status(500).json({ error: String(e?.message || e) });
+    res.status(400).json({ error: e?.message || String(e) });
   }
+});
+
+/* ===============================
+   EXCLUIR COTAÇÃO
+================================ */
+
+router.delete("/:id", (req, res) => {
+  const id = req.params.id;
+
+  const trx = db.transaction(() => {
+    db.prepare(`DELETE FROM quote_items WHERE quote_id = ?`).run(id);
+    db.prepare(`DELETE FROM quotes WHERE id = ?`).run(id);
+  });
+
+  trx();
+
+  res.json({ ok: true });
 });
 
 export default router;
