@@ -1,0 +1,19 @@
+## Pages
+- [- CotaFacil Store](/productdetail): No description available
+- [Auditoria | ONDA+](/auditlog): No description available
+- [Cálculo Fiscal - Módulo Fiscal](/calculofiscal): Ferramentas para cálculo de impostos de entrada e formação de preço de venda.
+- [Clientes | ONDA+](/clients): No description available
+- [Configurações | ONDA+](/settings): No description available
+- [Cotações | ONDA+](/quotes): No description available
+- [CotaFacil - Crie Propostas Comerciais em Minutos](/home): Acelere suas vendas com o CotaFacil. Crie, gerencie e envie propostas comerciais profissionais de forma rápida e intuitiva.
+- [Dashboard | ONDA+](/dashboard): No description available
+- [Detalhes da Empresa |](/companydetail): No description available
+- [Empresas | CotaFácil](/companies): No description available
+- [Integração de API via HTTPS | ONDA+](/apiintegration): Configure integrações de API via HTTPS para conectar sistemas externos
+- [Meu Perfil | ONDA+](/profile): No description available
+- [Módulo Fiscal - CotaFácil](/fiscal): Hub central para todas as operações fiscais.
+- [NFe (DF-e) - Módulo Fiscal](/nfe): Gerenciamento e distribuição de documentos fiscais eletrônicos.
+- [Pagamento Concluído! - CotaFacil](/success): Seu pagamento foi processado com sucesso. Obrigado pela sua compra!
+- [Untitled Page](/clientform): No description available
+- [Usuários | ONDA+](/users): No description available
+- [Vendedores | ONDA+](/sellers): No description available

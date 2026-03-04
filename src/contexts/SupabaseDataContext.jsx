@@ -1,0 +1,209 @@
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import { useAuth } from "@/contexts/SupabaseAuthContext";
+import { useToast } from "@/components/ui/use-toast";
+
+const DataContext = createContext(null);
+
+export const useData = () => {
+  const ctx = useContext(DataContext);
+  if (ctx === null) throw new Error("useData must be used within a SupabaseDataProvider");
+  return ctx;
+};
+
+const normalizeArray = (v) => (Array.isArray(v) ? v : []);
+
+async function safeJson(res) {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return { ok: false, error: text || "Resposta inválida" };
+  }
+}
+
+function getApiBase() {
+  // Se você usa proxy do Vite (/api -> 3000), pode deixar vazio.
+  // Mantemos compatível: se VITE_BFF_URL existir, usa; senão, usa origem atual.
+  const v = (import.meta.env.VITE_BFF_URL || "").trim();
+  if (v) return v.replace(/\/$/, "");
+  return "";
+}
+
+export function SupabaseDataProvider({ children }) {
+  const { user, bffFetch } = useAuth();
+  const { toast } = useToast();
+
+  const [loading, setLoading] = useState(true);
+
+  const [companies, setCompanies] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [sellers, setSellers] = useState([]);
+  const [quotes, setQuotes] = useState([]);
+  const [addresses, setAddresses] = useState([]);
+  const [users, setUsers] = useState([]);
+
+  const apiBase = getApiBase();
+
+  const plainFetch = useCallback(async (path, opts = {}) => {
+    const res = await fetch(`${apiBase}${path}`, {
+      ...opts,
+      headers: {
+        "Content-Type": "application/json",
+        ...(opts.headers || {}),
+      },
+    });
+    const data = await safeJson(res);
+    if (!res.ok) {
+      const msg = data?.error || `Erro HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    return data;
+  }, [apiBase]);
+
+  // ===== LOADERS =====
+  const fetchSellers = useCallback(async () => {
+    if (!user) return;
+    try {
+      const r = await bffFetch("/api/auth/sellers", { method: "GET" });
+      setSellers(normalizeArray(r.items));
+    } catch (e) {
+      toast({ variant: "destructive", title: "Erro ao buscar vendedores", description: e?.message || String(e) });
+    }
+  }, [user, bffFetch, toast]);
+
+  const fetchUsers = useCallback(async () => {
+    if (!user) return;
+    try {
+      const r = await bffFetch("/api/auth/users", { method: "GET" });
+      setUsers(normalizeArray(r.items));
+    } catch (e) {
+      // Nem todo perfil é admin; então só avisa leve
+      console.warn("[fetchUsers]", e);
+    }
+  }, [user, bffFetch]);
+
+  const fetchClients = useCallback(async () => {
+    if (!user) return;
+    try {
+      const r = await plainFetch("/api/voalle/clientes-db", { method: "GET" });
+      // backend retorna { ok:true, items:[...] }
+      if (r?.items) setClients(normalizeArray(r.items));
+      else setClients(normalizeArray(r));
+    } catch (e) {
+      toast({ variant: "destructive", title: "Erro ao buscar clientes", description: e?.message || String(e) });
+    }
+  }, [user, plainFetch, toast]);
+
+  const fetchQuotes = useCallback(async () => {
+    if (!user) return;
+    try {
+      const r = await plainFetch("/api/quotes", { method: "GET" });
+      // backend retorna { ok:true, items:[...] } OU array
+      if (r?.items) setQuotes(normalizeArray(r.items));
+      else setQuotes(normalizeArray(r));
+    } catch (e) {
+      toast({ variant: "destructive", title: "Erro ao buscar cotações", description: e?.message || String(e) });
+    }
+  }, [user, plainFetch, toast]);
+
+  const fetchProducts = useCallback(async () => {
+    if (!user) return;
+    try {
+      const r = await bffFetch("/api/products", { method: "GET" });
+      setProducts(normalizeArray(r.items || r.products || r));
+    } catch (e) {
+      console.warn("[fetchProducts]", e);
+    }
+  }, [user, bffFetch]);
+
+  // ===== MUTATIONS =====
+  const addUser = useCallback(async (payload) => {
+    const { name, email, password, role } = payload || {};
+    const r = await bffFetch("/api/auth/users", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password, role }),
+    });
+    await fetchUsers();
+    await fetchSellers();
+    return r;
+  }, [bffFetch, fetchUsers, fetchSellers]);
+
+  const deleteUser = useCallback(async (id) => {
+    const r = await bffFetch(`/api/auth/users/${id}`, { method: "DELETE" });
+    await fetchUsers();
+    await fetchSellers();
+    return r;
+  }, [bffFetch, fetchUsers, fetchSellers]);
+
+  const addQuote = useCallback(async (quote) => {
+    const r = await plainFetch("/api/quotes", {
+      method: "POST",
+      body: JSON.stringify(quote || {}),
+    });
+    await fetchQuotes();
+    return r;
+  }, [plainFetch, fetchQuotes]);
+
+  const updateQuote = useCallback(async (id, quote) => {
+    const r = await plainFetch(`/api/quotes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(quote || {}),
+    });
+    await fetchQuotes();
+    return r;
+  }, [plainFetch, fetchQuotes]);
+
+  const deleteQuote = useCallback(async (id) => {
+    const r = await plainFetch(`/api/quotes/${id}`, { method: "DELETE" });
+    await fetchQuotes();
+    return r;
+  }, [plainFetch, fetchQuotes]);
+
+  // bootstrap
+  useEffect(() => {
+    let cancelled = false;
+    async function boot() {
+      setLoading(true);
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      try {
+        await Promise.all([fetchSellers(), fetchClients(), fetchQuotes(), fetchProducts(), fetchUsers()]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    boot();
+    return () => { cancelled = true; };
+  }, [user, fetchSellers, fetchClients, fetchQuotes, fetchProducts, fetchUsers]);
+
+  const value = useMemo(() => ({
+    loading,
+    companies,
+    clients,
+    products,
+    sellers,
+    quotes,
+    addresses,
+    users,
+
+    // mutations esperadas pelas telas
+    addUser,
+    deleteUser,
+    addQuote,
+    updateQuote,
+    deleteQuote,
+
+    // placeholders (telas antigas podem chamar)
+    addClient: async () => { throw new Error("addClient não implementado no modo SQLite. Use sincronização Voalle."); },
+    updateClient: async () => { throw new Error("updateClient não implementado no modo SQLite."); },
+    deleteClient: async () => { throw new Error("deleteClient não implementado no modo SQLite."); },
+  }), [loading, companies, clients, products, sellers, quotes, addresses, users, addUser, deleteUser, addQuote, updateQuote, deleteQuote]);
+
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+}
+
+// ✅ alias para compatibilidade (algumas telas importam assim)
+export const DataProvider = SupabaseDataProvider;

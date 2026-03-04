@@ -1,0 +1,22 @@
+# deps
+node_modules/
+bff-node/node_modules/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# db/cache
+bff-node/voalle-cache.sqlite
+bff-node/*.sqlite
+bff-node/*.sqlite-journal
+bff-node/*.sqlite-wal
+bff-node/*.sqlite-shm
+
+# build
+dist/
+.vite/
+
+# misc
+.DS_Store
