@@ -49,7 +49,7 @@ function stripVoallePrefix(id) {
   return s.startsWith("voalle:") ? s.slice("voalle:".length) : s;
 }
 
-const API_BASE = ""; // se usa proxy do Vite, deixe vazio
+const API_BASE = ""; // se usa proxy, deixe vazio
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -69,6 +69,25 @@ async function apiFetch(path, options = {}) {
   return data;
 }
 
+function getInfoText(q) {
+  // aceita snake_case e camelCase
+  const contact = (q.contact_person || q.contactPerson || "").toString().trim();
+  const payment = (q.payment_terms || q.paymentTerms || "").toString().trim();
+  const freight = (q.freight_type || q.freightType || "").toString().trim();
+  const delivery = (q.delivery_location || q.deliveryLocation || "").toString().trim();
+  const notes = (q.notes || "").toString().trim();
+
+  const parts = [];
+
+  if (contact) parts.push(`Contato: ${contact}`);
+  if (payment) parts.push(`Pgto: ${payment}`);
+  if (freight) parts.push(`Frete: ${freight}`);
+  if (delivery) parts.push(`Entrega: ${delivery}`);
+  if (notes) parts.push(`Obs: ${notes}`);
+
+  return parts.join(" • ");
+}
+
 export default function Quotes() {
   const { quotes, clients, companies, users, addresses, sellers, deleteQuote, reloadQuotes } = useData();
   const navigate = useNavigate();
@@ -78,7 +97,6 @@ export default function Quotes() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewData, setPreviewData] = useState(null);
 
-  // ✅ UI imediata
   const [localQuotes, setLocalQuotes] = useState([]);
   useEffect(() => {
     setLocalQuotes(Array.isArray(quotes) ? quotes : []);
@@ -108,7 +126,7 @@ export default function Quotes() {
   const quotesWithClientNames = useMemo(() => {
     return safeQuotes
       .map((quote) => {
-        const directName = String(quote.client_name || "").trim();
+        const directName = String(quote.client_name || quote.clientName || "").trim();
         if (directName) {
           return { ...quote, clientName: directName, __time: safeTime(quote.created_at) };
         }
@@ -123,7 +141,7 @@ export default function Quotes() {
 
         return {
           ...quote,
-          clientName: client ? (client.name || client.nome_razao || client.nome_fantasia) : "Cliente não encontrado",
+          clientName: client ? (client.name || client.nome_razao || client.nome_fantasia) : "Cliente",
           __time: safeTime(quote.created_at),
         };
       })
@@ -135,9 +153,11 @@ export default function Quotes() {
     if (!s) return quotesWithClientNames;
 
     return quotesWithClientNames.filter((q) => {
+      const info = getInfoText(q).toLowerCase();
       return (
         String(q.proposal_number || q.proposta_numero || "").toLowerCase().includes(s) ||
-        String(q.clientName || "").toLowerCase().includes(s)
+        String(q.clientName || "").toLowerCase().includes(s) ||
+        info.includes(s)
       );
     });
   }, [quotesWithClientNames, searchTerm]);
@@ -158,15 +178,12 @@ export default function Quotes() {
   const handleDeleteQuote = async (id) => {
     try {
       setLocalQuotes((prev) => prev.filter((q) => String(q.id) !== String(id)));
-
       if (typeof deleteQuote !== "function") {
         toast({ variant: "destructive", title: "deleteQuote não encontrado", description: "SupabaseDataContext precisa expor deleteQuote(id)." });
         return;
       }
-
       await deleteQuote(id);
       toast({ title: "Cotação excluída", description: "Registro removido com sucesso." });
-
       if (typeof reloadQuotes === "function") await reloadQuotes();
     } catch (e) {
       if (typeof reloadQuotes === "function") await reloadQuotes();
@@ -177,13 +194,10 @@ export default function Quotes() {
   const handleApproveQuote = async (quote) => {
     try {
       await apiFetch(`/api/quotes/${quote.id}/approve`, { method: "POST" });
-
       setLocalQuotes((prev) =>
         prev.map((q) => (String(q.id) === String(quote.id) ? { ...q, status: "approved", updated_at: Date.now() } : q))
       );
-
-      toast({ title: "Cotação aprovada", description: `Proposta Nº ${quote.proposal_number || quote.proposta_numero || "-"}` });
-
+      toast({ title: "Cotação aprovada", description: `Proposta Nº ${quote.proposal_number || "-"}` });
       if (typeof reloadQuotes === "function") await reloadQuotes();
     } catch (e) {
       if (typeof reloadQuotes === "function") await reloadQuotes();
@@ -191,10 +205,6 @@ export default function Quotes() {
     }
   };
 
-  /**
-   * ✅ EDITAR COM ITENS:
-   * Busca a cotação completa no BFF e passa via state para a página de edição.
-   */
   const handleEditQuote = async (quote) => {
     try {
       const full = await apiFetch(`/api/quotes/${quote.id}`, { method: "GET" });
@@ -204,19 +214,14 @@ export default function Quotes() {
     }
   };
 
-  /**
-   * ✅ PDF/PRINT COM ITENS:
-   * Busca a cotação completa (com items) antes de abrir preview.
-   */
   const openPDFPreview = async (quote) => {
     try {
       const full = await apiFetch(`/api/quotes/${quote.id}`, { method: "GET" });
 
-      // normaliza números
-      const fullItems = Array.isArray(full.items) ? full.items : [];
+      const items = Array.isArray(full.items) ? full.items : [];
       const normalizedQuote = {
         ...full,
-        items: fullItems.map((it) => ({
+        items: items.map((it) => ({
           ...it,
           quantity: Number(it.quantity || 0),
           unit_price: Number(it.unit_price || 0),
@@ -224,16 +229,38 @@ export default function Quotes() {
         })),
       };
 
-      const company = safeCompanies.find((c) => String(c.id) === String(normalizedQuote.company_id)) || null;
+      let company = safeCompanies.find((c) => String(c.id) === String(normalizedQuote.company_id)) || null;
+      if (!company) {
+        const companyName = String(normalizedQuote.company_name || "Fibra Onda+ LTDA");
+        const companyDoc = String(normalizedQuote.company_document || "14.429.925/0001-67");
+        company = {
+          id: String(normalizedQuote.company_id || "static"),
+          name: companyName,
+          cnpj: companyDoc,
+          razao_social: normalizedQuote.company_razao_social || companyName,
+          nome_fantasia: normalizedQuote.company_nome_fantasia || companyName,
+        };
+      }
 
       const qClientId = String(normalizedQuote.client_id || "");
       const qClientIdRaw = stripVoallePrefix(qClientId);
 
-      const client =
+      let client =
         safeClients.find((c) => String(c.id) === qClientId) ||
         safeClients.find((c) => String(c.id) === qClientIdRaw) ||
         safeClients.find((c) => stripVoallePrefix(c.id) === qClientIdRaw) ||
         null;
+
+      if (!client) {
+        const clientName = String(normalizedQuote.client_name || normalizedQuote.clientName || "Cliente");
+        const clientDoc = String(normalizedQuote.client_document || normalizedQuote.clientDoc || "");
+        client = {
+          id: qClientId || qClientIdRaw || "client",
+          name: clientName,
+          nome_razao: clientName,
+          cpf_cnpj: clientDoc,
+        };
+      }
 
       const autor = safeUsers.find((u) => String(u.id) === String(normalizedQuote.user_id)) || null;
       const vendedor = safeSellers.find((s) => String(s.id) === String(normalizedQuote.seller_id)) || null;
@@ -246,18 +273,14 @@ export default function Quotes() {
         ? { ...client, addresses: safeAddresses.filter((a) => String(a.client_id) === String(client.id)) }
         : null;
 
-      if (!companyWithAddr || !clientWithAddr) {
-        toast({ variant: "destructive", title: "Dados incompletos", description: "Empresa ou cliente não encontrado para gerar o PDF." });
-        return;
-      }
-
       setPreviewData({
-        quote: normalizedQuote, // ✅ agora com items
-        company: companyWithAddr,
-        client: clientWithAddr,
+        quote: normalizedQuote,
+        company: companyWithAddr || company,
+        client: clientWithAddr || client,
         vendedor,
         autor,
       });
+
       setPreviewOpen(true);
     } catch (e) {
       toast({ variant: "destructive", title: "Erro ao gerar PDF", description: e?.message || String(e) });
@@ -266,16 +289,37 @@ export default function Quotes() {
 
   const handleConfirmPdf = async (template, meta) => {
     const action = meta?.action || "download";
-
     if (!previewData?.company || !previewData?.client) {
       toast({ variant: "destructive", title: "Dados incompletos", description: "Não foi possível montar os dados do PDF." });
       return;
     }
 
+    const resultToUrl = (result) => {
+      if (!result) return null;
+      if (typeof result === "string") return result;
+      if (result?.url && typeof result.url === "string") return result.url;
+
+      const blob = result?.blob instanceof Blob ? result.blob : result instanceof Blob ? result : null;
+      if (blob) return URL.createObjectURL(blob);
+      return null;
+    };
+
     try {
       if (action === "print") {
-        const { url } = await generateQuotePDF({ ...previewData, template }, { download: false });
-        openAndPrintUrl(url);
+        const result = await generateQuotePDF({ ...previewData, template }, { download: false });
+        const url = resultToUrl(result);
+
+        if (url) {
+          openAndPrintUrl(url);
+          return;
+        }
+
+        await generateQuotePDF({ ...previewData, template });
+
+        toast({
+          title: "PDF gerado",
+          description: "O gerador baixou o PDF, mas não retornou URL/Blob para impressão automática.",
+        });
         return;
       }
 
@@ -314,7 +358,7 @@ export default function Quotes() {
           <div className="relative w-full md:w-1/3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
             <Input
-              placeholder="Buscar por nº ou cliente..."
+              placeholder="Buscar por nº, cliente ou info..."
               className="pl-10 w-full input-field"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -328,6 +372,7 @@ export default function Quotes() {
               <tr className="border-b border-white/10">
                 <th className="text-left py-3 px-2">Proposta</th>
                 <th className="text-left py-3 px-2">Cliente</th>
+                <th className="text-left py-3 px-2">Informações</th>
                 <th className="text-left py-3 px-2">Data</th>
                 <th className="text-right py-3 px-2">Valor</th>
                 <th className="text-left py-3 px-2">Status</th>
@@ -338,17 +383,18 @@ export default function Quotes() {
             <tbody>
               {filteredQuotes.map((quote) => (
                 <tr key={quote.id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3 px-2 text-slate-100 font-semibold">
-                    {quote.proposal_number || quote.proposta_numero || "-"}
-                  </td>
-
+                  <td className="py-3 px-2 text-slate-100 font-semibold">{quote.proposal_number || "-"}</td>
                   <td className="py-3 px-2 text-slate-200">{quote.clientName}</td>
+
+                  <td className="py-3 px-2 text-slate-300">
+                    <div className="max-w-[520px] whitespace-nowrap overflow-hidden text-ellipsis" title={getInfoText(quote)}>
+                      {getInfoText(quote) || "-"}
+                    </div>
+                  </td>
 
                   <td className="py-3 px-2 text-slate-300">{safeFormatDate(quote.created_at)}</td>
 
-                  <td className="py-3 px-2 text-right text-slate-200">
-                    {formatCurrency(quote.total_value || quote.total_geral || 0)}
-                  </td>
+                  <td className="py-3 px-2 text-right text-slate-200">{formatCurrency(quote.total_value || 0)}</td>
 
                   <td className="py-3 px-2">
                     <span className={`px-2 py-1 rounded-md text-xs ${getStatusClass(quote.status)}`}>
@@ -388,8 +434,7 @@ export default function Quotes() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
                             <AlertDialogDescription className="text-white/70">
-                              Tem certeza que deseja excluir a cotação Nº{" "}
-                              <b>{quote.proposal_number || quote.proposta_numero}</b>? Esta ação não pode ser desfeita.
+                              Tem certeza que deseja excluir a cotação Nº <b>{quote.proposal_number || "-"}</b>? Esta ação não pode ser desfeita.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
 
@@ -408,7 +453,7 @@ export default function Quotes() {
 
               {filteredQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-slate-500">
+                  <td colSpan={7} className="py-10 text-center text-slate-500">
                     Nenhuma cotação encontrada.
                   </td>
                 </tr>

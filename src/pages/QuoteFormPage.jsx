@@ -15,6 +15,7 @@ import QuotePDFPreviewDialog from "@/components/quotes/QuotePDFPreviewDialog";
 import { Input } from "@/components/ui/input";
 import { listSellers } from "@/services/sellers";
 import { useAuth } from "@/contexts/SupabaseAuthContext";
+import { uid } from "@/lib/utils"; // ✅ garante uid nos itens
 
 const onlyDigits = (s) => String(s || "").replace(/\D/g, "");
 
@@ -59,6 +60,61 @@ function formatClientLabel(c) {
 
 function safeText(v) {
   return v === 0 ? "0" : v ? String(v) : "";
+}
+
+function n(v) {
+  const x = Number(String(v ?? "").replace(",", "."));
+  return Number.isFinite(x) ? x : 0;
+}
+
+/**
+ * ✅ NORMALIZA ITENS do BFF para o formato que seu QuoteItemsManager/ItemTable esperam
+ * - garante uid
+ * - garante item_type (sem isso suas tabelas ficam vazias!)
+ * - garante taxes {icms, issqn}
+ * - garante números
+ */
+function normalizeItems(items) {
+  const list = Array.isArray(items) ? items : [];
+  return list.map((it) => {
+    const quantity = n(it.quantity);
+    const unit_price = n(it.unit_price);
+
+    // item_type pode não existir no banco -> default PRODUTO
+    const item_type = String(it.item_type || it.type || it.itemType || "PRODUTO").toUpperCase();
+
+    // taxes pode vir em it.taxes (front) ou icms/issqn (banco)
+    const icms = n(it.icms ?? it?.taxes?.icms);
+    const issqn = n(it.issqn ?? it?.taxes?.issqn);
+
+    const total_price =
+      n(it.total_price) || quantity * unit_price;
+
+    return {
+      ...it,
+      uid: it.uid || it.id || uid(),
+      item_type: item_type === "SERVICE" ? "SERVICO" : item_type, // compat
+      source: it.source || (it.product_id ? "catalog" : "manual"),
+      product_id: it.product_id || null,
+
+      code: it.code || it.cod || it.codigo || "",
+      description: it.description || it.descricao || "",
+      unit: it.unit || "un",
+
+      quantity,
+      unit_price,
+      total_price,
+
+      icms,
+      issqn,
+
+      taxes: {
+        ...(it.taxes || {}),
+        icms,
+        issqn,
+      },
+    };
+  });
 }
 
 export default function QuoteFormPage() {
@@ -160,40 +216,101 @@ export default function QuoteFormPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // INIT QUOTE
+  // ✅ INIT QUOTE (corrigido: preload -> GET /api/quotes/:id -> fallback safeQuotes)
   useEffect(() => {
     const userId = supabaseUser?.id || "";
 
-    if (id) {
-      const quote = safeQuotes.find((q) => String(q?.id) === String(id));
-      if (quote) {
-        setCurrentQuote((prev) => ({
-          ...prev,
-          ...quote,
-          user_id: userId,
-          items: Array.isArray(quote.items) ? quote.items : [],
-          company_id: String(quote.company_id || DEFAULT_COMPANY_ID),
+    async function loadEditQuote() {
+      if (!id) return;
 
-          validity_date: safeText(quote.validity_date),
-          payment_terms: safeText(quote.payment_terms),
-          freight_type: safeText(quote.freight_type) || "CIF",
-          delivery_location: safeText(quote.delivery_location),
-          notes: safeText(quote.notes),
+      try {
+        // 1) veio da lista (navigate com state.quote)
+        const preload = location.state?.quote;
+        if (preload) {
+          setCurrentQuote((prev) => ({
+            ...prev,
+            ...preload,
+            user_id: userId,
+            items: normalizeItems(preload.items),
+            company_id: String(preload.company_id || DEFAULT_COMPANY_ID),
 
-          // se já veio do DB do BFF (snake_case), preserva no state também:
-          contactPerson: safeText(quote.contact_person || quote.contactPerson || prev.contactPerson),
-        }));
+            validity_date: safeText(preload.validity_date),
+            payment_terms: safeText(preload.payment_terms),
+            freight_type: safeText(preload.freight_type) || "CIF",
+            delivery_location: safeText(preload.delivery_location),
+            notes: safeText(preload.notes),
+
+            contactPerson: safeText(preload.contact_person || preload.contactPerson || prev.contactPerson),
+          }));
+          return;
+        }
+
+        // 2) fallback: busca no backend (cotação completa com itens)
+        const resp = await fetch(`/api/quotes/${id}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setCurrentQuote((prev) => ({
+            ...prev,
+            ...data,
+            user_id: userId,
+            items: normalizeItems(data.items),
+            company_id: String(data.company_id || DEFAULT_COMPANY_ID),
+
+            validity_date: safeText(data.validity_date),
+            payment_terms: safeText(data.payment_terms),
+            freight_type: safeText(data.freight_type) || "CIF",
+            delivery_location: safeText(data.delivery_location),
+            notes: safeText(data.notes),
+
+            contactPerson: safeText(data.contact_person || data.contactPerson || prev.contactPerson),
+          }));
+          return;
+        }
+
+        // 3) fallback antigo (lista local do contexto)
+        const quote = safeQuotes.find((q) => String(q?.id) === String(id));
+        if (quote) {
+          setCurrentQuote((prev) => ({
+            ...prev,
+            ...quote,
+            user_id: userId,
+            items: normalizeItems(quote.items),
+            company_id: String(quote.company_id || DEFAULT_COMPANY_ID),
+
+            validity_date: safeText(quote.validity_date),
+            payment_terms: safeText(quote.payment_terms),
+            freight_type: safeText(quote.freight_type) || "CIF",
+            delivery_location: safeText(quote.delivery_location),
+            notes: safeText(quote.notes),
+
+            contactPerson: safeText(quote.contact_person || quote.contactPerson || prev.contactPerson),
+          }));
+        }
+      } catch (e) {
+        console.error("Erro ao carregar cotação:", e);
+        toast({
+          variant: "destructive",
+          title: "Erro ao carregar cotação",
+          description: String(e?.message || e),
+        });
       }
+    }
+
+    // modo criar
+    if (!id) {
+      setCurrentQuote((prev) => ({
+        ...prev,
+        proposal_number: String(getNextProposalNumber(safeQuotes)).padStart(5, "0"),
+        user_id: userId,
+        company_id: String(prev.company_id || DEFAULT_COMPANY_ID),
+      }));
       return;
     }
 
-    setCurrentQuote((prev) => ({
-      ...prev,
-      proposal_number: String(getNextProposalNumber(safeQuotes)).padStart(5, "0"),
-      user_id: userId,
-      company_id: String(prev.company_id || DEFAULT_COMPANY_ID),
-    }));
-  }, [id, safeQuotes, supabaseUser]);
+    // modo editar
+    loadEditQuote();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, supabaseUser, location.state, safeQuotes]);
 
   // SELLER DEFAULT = LOGADO
   useEffect(() => {
@@ -282,7 +399,7 @@ export default function QuoteFormPage() {
 
   // HANDLERS
   const handleItemsChange = (newItems) =>
-    setCurrentQuote((prev) => ({ ...prev, items: Array.isArray(newItems) ? newItems : [] }));
+    setCurrentQuote((prev) => ({ ...prev, items: normalizeItems(newItems) })); // ✅ garante que edições também mantenham formato
 
   const handleInputChange = (e) => setCurrentQuote((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
@@ -340,7 +457,8 @@ export default function QuoteFormPage() {
 
     const totalTributos = items.reduce((acc, item) => {
       const taxes = item.taxes || {};
-      return acc + (taxes.total_tributos_item || 0);
+      // se você não usa total_tributos_item, deixa como 0 (não quebra)
+      return acc + n(taxes.total_tributos_item || 0);
     }, 0);
 
     const totalGeral = subtotalProdutos + subtotalServicos + subtotalScm;
@@ -489,7 +607,6 @@ export default function QuoteFormPage() {
     const isExternalCompany = fixedCompanyId.startsWith("static:");
     const isExternalClient = fixedClientId.startsWith("voalle:");
 
-    // snapshots (para listar e imprimir sem depender do cadastro)
     const companyName = safeText(DEFAULT_COMPANY.name);
     const companyDoc = safeText(DEFAULT_COMPANY.cnpj);
 
@@ -540,16 +657,18 @@ export default function QuoteFormPage() {
 
       total_value: Number(totais.totalGeral || 0),
 
-      items: (Array.isArray(currentQuote.items) ? currentQuote.items : []).map((item) => ({
+      items: normalizeItems(currentQuote.items).map((item) => ({
         id: item.id || undefined,
-        item_id: item.source === "catalog" ? item.id : (item.item_id || ""),
-        item_type: item.item_type,
+        product_id: item.product_id || null,
+        item_type: item.item_type || "PRODUTO",
         code: item.code,
         description: item.description,
         unit: item.unit,
         quantity: item.quantity,
         unit_price: item.unit_price,
         total_price: item.total_price,
+        icms: n(item.icms ?? item?.taxes?.icms),
+        issqn: n(item.issqn ?? item?.taxes?.issqn),
         taxes: item.taxes || {},
       })),
     };
@@ -558,7 +677,6 @@ export default function QuoteFormPage() {
       const saved = await addQuote(quotePayload); // ✅ vai pro BFF
       toast({ title: currentQuote.id ? "Cotação atualizada!" : "Cotação criada!", description: "A cotação foi salva com sucesso." });
 
-      // se criou nova, atualiza state com id retornado (útil se continuar editando)
       if (saved?.id && !currentQuote.id) {
         setCurrentQuote((prev) => ({ ...prev, id: saved.id }));
       }
@@ -687,43 +805,6 @@ export default function QuoteFormPage() {
             serviceItems={serviceItems}
             scmServiceItems={scmServiceItems}
           />
-        </div>
-
-        <div className="floating-card p-6">
-          <h3 className="text-lg font-semibold text-white mb-4">Informações Adicionais</h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="validity_date">Validade da Proposta (dias)</Label>
-              <Input name="validity_date" value={currentQuote.validity_date} onChange={handleInputChange} className="input-field" placeholder="Ex: 15" />
-            </div>
-
-            <div>
-              <Label htmlFor="payment_terms">Condições de Pagamento</Label>
-              <Input name="payment_terms" value={currentQuote.payment_terms} onChange={handleInputChange} className="input-field" placeholder="Ex: 30/60/90" />
-            </div>
-
-            <div>
-              <Label htmlFor="freight_type">Tipo de Frete</Label>
-              <Input name="freight_type" value={currentQuote.freight_type} onChange={handleInputChange} className="input-field" placeholder="Ex: CIF/FOB" />
-            </div>
-
-            <div>
-              <Label htmlFor="delivery_location">Local de Entrega</Label>
-              <Input name="delivery_location" value={currentQuote.delivery_location} onChange={handleInputChange} className="input-field" placeholder="Ex: Endereço do cliente" />
-            </div>
-
-            <div className="md:col-span-2">
-              <Label htmlFor="notes">Observações e Condições Gerais</Label>
-              <textarea
-                name="notes"
-                value={currentQuote.notes}
-                onChange={handleInputChange}
-                className="input-field min-h-[110px] w-full resize-none"
-                placeholder="Insira aqui as condições, garantias, etc."
-              />
-            </div>
-          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -22,8 +22,6 @@ async function safeJson(res) {
 }
 
 function getApiBase() {
-  // Se você usa proxy do Vite (/api -> 3000), pode deixar vazio.
-  // Mantemos compatível: se VITE_BFF_URL existir, usa; senão, usa origem atual.
   const v = (import.meta.env.VITE_BFF_URL || "").trim();
   if (v) return v.replace(/\/$/, "");
   return "";
@@ -45,21 +43,24 @@ export function SupabaseDataProvider({ children }) {
 
   const apiBase = getApiBase();
 
-  const plainFetch = useCallback(async (path, opts = {}) => {
-    const res = await fetch(`${apiBase}${path}`, {
-      ...opts,
-      headers: {
-        "Content-Type": "application/json",
-        ...(opts.headers || {}),
-      },
-    });
-    const data = await safeJson(res);
-    if (!res.ok) {
-      const msg = data?.error || `Erro HTTP ${res.status}`;
-      throw new Error(msg);
-    }
-    return data;
-  }, [apiBase]);
+  const plainFetch = useCallback(
+    async (path, opts = {}) => {
+      const res = await fetch(`${apiBase}${path}`, {
+        ...opts,
+        headers: {
+          "Content-Type": "application/json",
+          ...(opts.headers || {}),
+        },
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        const msg = data?.error || data?.message || `Erro HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      return data;
+    },
+    [apiBase]
+  );
 
   // ===== LOADERS =====
   const fetchSellers = useCallback(async () => {
@@ -78,7 +79,6 @@ export function SupabaseDataProvider({ children }) {
       const r = await bffFetch("/api/auth/users", { method: "GET" });
       setUsers(normalizeArray(r.items));
     } catch (e) {
-      // Nem todo perfil é admin; então só avisa leve
       console.warn("[fetchUsers]", e);
     }
   }, [user, bffFetch]);
@@ -87,7 +87,6 @@ export function SupabaseDataProvider({ children }) {
     if (!user) return;
     try {
       const r = await plainFetch("/api/voalle/clientes-db", { method: "GET" });
-      // backend retorna { ok:true, items:[...] }
       if (r?.items) setClients(normalizeArray(r.items));
       else setClients(normalizeArray(r));
     } catch (e) {
@@ -99,7 +98,6 @@ export function SupabaseDataProvider({ children }) {
     if (!user) return;
     try {
       const r = await plainFetch("/api/quotes", { method: "GET" });
-      // backend retorna { ok:true, items:[...] } OU array
       if (r?.items) setQuotes(normalizeArray(r.items));
       else setQuotes(normalizeArray(r));
     } catch (e) {
@@ -117,52 +115,85 @@ export function SupabaseDataProvider({ children }) {
     }
   }, [user, bffFetch]);
 
+  // ✅ alias explícito (as telas chamam reloadQuotes)
+  const reloadQuotes = useCallback(async () => {
+    await fetchQuotes();
+  }, [fetchQuotes]);
+
   // ===== MUTATIONS =====
-  const addUser = useCallback(async (payload) => {
-    const { name, email, password, role } = payload || {};
-    const r = await bffFetch("/api/auth/users", {
-      method: "POST",
-      body: JSON.stringify({ name, email, password, role }),
-    });
-    await fetchUsers();
-    await fetchSellers();
-    return r;
-  }, [bffFetch, fetchUsers, fetchSellers]);
+  const addUser = useCallback(
+    async (payload) => {
+      const { name, email, password, role } = payload || {};
+      const r = await bffFetch("/api/auth/users", {
+        method: "POST",
+        body: JSON.stringify({ name, email, password, role }),
+      });
+      await fetchUsers();
+      await fetchSellers();
+      return r;
+    },
+    [bffFetch, fetchUsers, fetchSellers]
+  );
 
-  const deleteUser = useCallback(async (id) => {
-    const r = await bffFetch(`/api/auth/users/${id}`, { method: "DELETE" });
-    await fetchUsers();
-    await fetchSellers();
-    return r;
-  }, [bffFetch, fetchUsers, fetchSellers]);
+  const deleteUser = useCallback(
+    async (id) => {
+      const r = await bffFetch(`/api/auth/users/${id}`, { method: "DELETE" });
+      await fetchUsers();
+      await fetchSellers();
+      return r;
+    },
+    [bffFetch, fetchUsers, fetchSellers]
+  );
 
-  const addQuote = useCallback(async (quote) => {
-    const r = await plainFetch("/api/quotes", {
-      method: "POST",
-      body: JSON.stringify(quote || {}),
-    });
-    await fetchQuotes();
-    return r;
-  }, [plainFetch, fetchQuotes]);
+  /**
+   * ✅ addQuote agora é UPSERT:
+   * - se vier quote.id -> PUT /api/quotes/:id (update)
+   * - senão -> POST /api/quotes (create)
+   */
+  const addQuote = useCallback(
+    async (quote) => {
+      const q = quote || {};
+      const isUpdate = Boolean(q?.id);
 
-  const updateQuote = useCallback(async (id, quote) => {
-    const r = await plainFetch(`/api/quotes/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(quote || {}),
-    });
-    await fetchQuotes();
-    return r;
-  }, [plainFetch, fetchQuotes]);
+      const path = isUpdate ? `/api/quotes/${q.id}` : `/api/quotes`;
+      const method = isUpdate ? "PUT" : "POST";
 
-  const deleteQuote = useCallback(async (id) => {
-    const r = await plainFetch(`/api/quotes/${id}`, { method: "DELETE" });
-    await fetchQuotes();
-    return r;
-  }, [plainFetch, fetchQuotes]);
+      const r = await plainFetch(path, {
+        method,
+        body: JSON.stringify(q),
+      });
+
+      await fetchQuotes();
+      return r;
+    },
+    [plainFetch, fetchQuotes]
+  );
+
+  const updateQuote = useCallback(
+    async (id, quote) => {
+      const r = await plainFetch(`/api/quotes/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(quote || {}),
+      });
+      await fetchQuotes();
+      return r;
+    },
+    [plainFetch, fetchQuotes]
+  );
+
+  const deleteQuote = useCallback(
+    async (id) => {
+      const r = await plainFetch(`/api/quotes/${id}`, { method: "DELETE" });
+      await fetchQuotes();
+      return r;
+    },
+    [plainFetch, fetchQuotes]
+  );
 
   // bootstrap
   useEffect(() => {
     let cancelled = false;
+
     async function boot() {
       setLoading(true);
       if (!user) {
@@ -175,35 +206,67 @@ export function SupabaseDataProvider({ children }) {
         if (!cancelled) setLoading(false);
       }
     }
+
     boot();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, [user, fetchSellers, fetchClients, fetchQuotes, fetchProducts, fetchUsers]);
 
-  const value = useMemo(() => ({
-    loading,
-    companies,
-    clients,
-    products,
-    sellers,
-    quotes,
-    addresses,
-    users,
+  const value = useMemo(
+    () => ({
+      loading,
+      companies,
+      clients,
+      products,
+      sellers,
+      quotes,
+      addresses,
+      users,
 
-    // mutations esperadas pelas telas
-    addUser,
-    deleteUser,
-    addQuote,
-    updateQuote,
-    deleteQuote,
+      // loaders (úteis para telas)
+      reloadQuotes,
+      fetchQuotes,
 
-    // placeholders (telas antigas podem chamar)
-    addClient: async () => { throw new Error("addClient não implementado no modo SQLite. Use sincronização Voalle."); },
-    updateClient: async () => { throw new Error("updateClient não implementado no modo SQLite."); },
-    deleteClient: async () => { throw new Error("deleteClient não implementado no modo SQLite."); },
-  }), [loading, companies, clients, products, sellers, quotes, addresses, users, addUser, deleteUser, addQuote, updateQuote, deleteQuote]);
+      // mutations esperadas pelas telas
+      addUser,
+      deleteUser,
+      addQuote,     // ✅ agora faz create/update automaticamente
+      updateQuote,
+      deleteQuote,
+
+      // placeholders
+      addClient: async () => {
+        throw new Error("addClient não implementado no modo SQLite. Use sincronização Voalle.");
+      },
+      updateClient: async () => {
+        throw new Error("updateClient não implementado no modo SQLite.");
+      },
+      deleteClient: async () => {
+        throw new Error("deleteClient não implementado no modo SQLite.");
+      },
+    }),
+    [
+      loading,
+      companies,
+      clients,
+      products,
+      sellers,
+      quotes,
+      addresses,
+      users,
+      reloadQuotes,
+      fetchQuotes,
+      addUser,
+      deleteUser,
+      addQuote,
+      updateQuote,
+      deleteQuote,
+    ]
+  );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }
 
-// ✅ alias para compatibilidade (algumas telas importam assim)
 export const DataProvider = SupabaseDataProvider;
