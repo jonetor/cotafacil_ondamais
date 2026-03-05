@@ -90,7 +90,6 @@ function buildCompanyDadosLine(company) {
   const email = safeText(c?.email || COMPANY_FALLBACK.email).trim();
   const fone = safeText(c?.fone || COMPANY_FALLBACK.fone).trim();
 
-  // linha igual ao seu exemplo (com separadores)
   return `CNPJ: ${cnpj} — I.E. ${ie} — ${endereco} — ${cep} — ${site} — EMAIL: ${email} — FONE: ${fone}`;
 }
 
@@ -102,35 +101,29 @@ function drawBrand(doc, brand) {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
 
-  // onda superior
   if (brand?.waveHeader) doc.addImage(brand.waveHeader, "PNG", 0, 0, pageW, 18);
 
   const topY = 16;
 
-  // logo
   if (brand?.logo) {
     const logoW = 80;
     const logoH = 20;
     doc.addImage(brand.logo, "PNG", pageW - logoW - 14, topY, logoW, logoH);
   }
 
-  // slogan
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(60);
   doc.text("A ONDA TRANSFORMADORA", 14, topY + 5);
 
-  // linha separadora
   doc.setDrawColor(200);
   doc.setLineWidth(0.3);
   doc.line(14, topY + 26, pageW - 14, topY + 26);
 
-  // onda inferior
   if (brand?.waveFooter) doc.addImage(brand.waveFooter, "PNG", 0, pageH - 18, pageW, 18);
 
   doc.setTextColor(0);
 
-  // topo útil
   return topY + 32;
 }
 
@@ -166,6 +159,13 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
     };
   });
 
+  // ✅ DESCRIÇÃO (prioriza q.description; fallback para q.notes)
+  const description = safeText(q.description || q.descricao || q.desc || "").trim();
+  const notes = safeText(q.notes || "").trim();
+
+  // Se você está usando "notes" como descrição no front, isso garante que sempre imprime
+  const finalDescription = description || notes;
+
   return {
     quote: {
       ...q,
@@ -178,8 +178,12 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
       payment_terms: safeText(q.payment_terms || "").trim(),
       freight_type: safeText(q.freight_type || "").trim(),
       delivery_location: safeText(q.delivery_location || "").trim(),
-      notes: safeText(q.notes || "").trim(),
-      contactPerson: safeText(q.contactPerson || "").trim(),
+
+      // ✅ agora temos os 2
+      description: finalDescription,
+      notes: notes,
+
+      contactPerson: safeText(q.contactPerson || q.contact_person || "").trim(),
     },
     company: company || null,
     client: client
@@ -210,11 +214,19 @@ function drawAdditionalInfoBlock(doc, startY, quote) {
   if (quote.freight_type) lines.push(`Tipo de frete: ${quote.freight_type}`);
   if (quote.delivery_location) lines.push(`Local de entrega: ${quote.delivery_location}`);
 
-  const hasNotes = Boolean(quote.notes);
+  const desc = safeText(quote.description || "").trim();
+  const notes = safeText(quote.notes || "").trim();
 
-  if (lines.length === 0 && !hasNotes) return startY;
+  // ✅ se notes == description, mostramos só uma vez
+  const showNotes = notes && notes !== desc;
 
-  const needed = hasNotes ? 40 : 22;
+  const hasDesc = Boolean(desc);
+  const hasNotes = Boolean(showNotes);
+
+  if (lines.length === 0 && !hasDesc && !hasNotes) return startY;
+
+  // espaço aproximado
+  const needed = (hasDesc ? 34 : 0) + (hasNotes ? 34 : 0) + (lines.length ? 22 : 0);
   if (startY + needed > pageH - 24) {
     doc.addPage();
     startY = 40;
@@ -236,13 +248,26 @@ function drawAdditionalInfoBlock(doc, startY, quote) {
     y += chunk.length * 4 + 2;
   }
 
+  // ✅ DESCRIÇÃO
+  if (hasDesc) {
+    doc.setFont("helvetica", "bold");
+    doc.text("Descrição da Cotação:", margin, y);
+    y += 5;
+
+    doc.setFont("helvetica", "normal");
+    const descLines = doc.splitTextToSize(desc, pageW - margin * 2);
+    doc.text(descLines, margin, y);
+    y += descLines.length * 4 + 2;
+  }
+
+  // ✅ OBSERVAÇÕES (se forem diferentes da descrição)
   if (hasNotes) {
     doc.setFont("helvetica", "bold");
     doc.text("Observações:", margin, y);
     y += 5;
 
     doc.setFont("helvetica", "normal");
-    const noteLines = doc.splitTextToSize(quote.notes, pageW - margin * 2);
+    const noteLines = doc.splitTextToSize(notes, pageW - margin * 2);
     doc.text(noteLines, margin, y);
     y += noteLines.length * 4 + 2;
   }
@@ -260,12 +285,10 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
 
   const contentTop = drawBrand(doc, brand);
 
-  // Título
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
   doc.text("ORÇAMENTO", pageW / 2, contentTop, { align: "center" });
 
-  // ✅ Linha de dados da empresa (a que você mostrou)
   const dadosEmpresa = buildCompanyDadosLine(company);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
@@ -277,7 +300,6 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
   const sellerName = safeText(vendedor?.name || vendedor?.nome || autor?.name || "").trim();
   const solicitante = safeText(quote?.contactPerson || "").trim();
 
-  // Nº / Revisão / Data (agora descem um pouco por causa da linha extra)
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text(`Nº: ${quote.proposalNumber} • Revisão: ${quote.revision}`, margin, contentTop + 16);
@@ -293,7 +315,6 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
     y += 5;
   }
 
-  // Cliente (nome/doc)
   if (client) {
     const clientName = safeText(client?.nome_razao || client?.name || "").trim();
     const clientDoc = formatDoc(client?.__doc, client?.__isPF);
@@ -388,7 +409,7 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
   doc.setFontSize(11);
   doc.text(`TOTAL: ${formatCurrency(total)}`, pageW - margin, cursorY + 2, { align: "right" });
 
-  let blockY = cursorY + 10;
+  const blockY = cursorY + 10;
   drawAdditionalInfoBlock(doc, blockY, quote);
 }
 
@@ -412,5 +433,6 @@ export const generateQuotePDF = async (payload, options = {}) => {
     return { ok: true };
   }
 
+  // ✅ retorna Blob (e seu Quotes.jsx já sabe transformar em URL pra imprimir)
   return doc.output("blob");
 };

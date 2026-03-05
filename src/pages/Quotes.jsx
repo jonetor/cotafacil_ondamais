@@ -5,14 +5,15 @@ import { useData } from "@/contexts/SupabaseDataContext";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label"; // ✅ FALTAVA ISSO (quebrava o front)
 import { useNavigate } from "react-router-dom";
-import { Plus, Edit, Trash2, Search, FileDown, CheckCircle2 } from "lucide-react";
+import { Plus, Edit, Trash2, Search, FileDown, CheckCircle2, Pencil } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
-  AlertDialogDescription,
+  AlertDialogDescription as AlertDesc,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -22,6 +23,8 @@ import { format } from "date-fns";
 
 import QuotePDFPreviewDialog from "@/components/quotes/QuotePDFPreviewDialog";
 import { generateQuotePDF } from "@/lib/pdfGenerator";
+
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 function formatCurrency(value) {
   return (Number(value) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -70,26 +73,26 @@ async function apiFetch(path, options = {}) {
 }
 
 function getInfoText(q) {
-  // aceita snake_case e camelCase
   const contact = (q.contact_person || q.contactPerson || "").toString().trim();
   const payment = (q.payment_terms || q.paymentTerms || "").toString().trim();
   const freight = (q.freight_type || q.freightType || "").toString().trim();
   const delivery = (q.delivery_location || q.deliveryLocation || "").toString().trim();
-  const notes = (q.notes || "").toString().trim();
 
   const parts = [];
-
   if (contact) parts.push(`Contato: ${contact}`);
   if (payment) parts.push(`Pgto: ${payment}`);
   if (freight) parts.push(`Frete: ${freight}`);
   if (delivery) parts.push(`Entrega: ${delivery}`);
-  if (notes) parts.push(`Obs: ${notes}`);
-
   return parts.join(" • ");
 }
 
+function getDescription(q) {
+  // ✅ vamos usar notes como “descrição” (já existe no QuoteFormPage e no backend)
+  return String(q.notes || q.description || q.descricao || "").trim();
+}
+
 export default function Quotes() {
-  const { quotes, clients, companies, users, addresses, sellers, deleteQuote, reloadQuotes } = useData();
+  const { quotes, clients, companies, users, addresses, sellers, deleteQuote, reloadQuotes, updateQuote } = useData();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -101,6 +104,12 @@ export default function Quotes() {
   useEffect(() => {
     setLocalQuotes(Array.isArray(quotes) ? quotes : []);
   }, [quotes]);
+
+  // modal descrição
+  const [descOpen, setDescOpen] = useState(false);
+  const [descQuote, setDescQuote] = useState(null);
+  const [descValue, setDescValue] = useState("");
+  const [savingDesc, setSavingDesc] = useState(false);
 
   const safeQuotes = Array.isArray(localQuotes) ? localQuotes : [];
   const safeClients = Array.isArray(clients) ? clients : [];
@@ -154,10 +163,12 @@ export default function Quotes() {
 
     return quotesWithClientNames.filter((q) => {
       const info = getInfoText(q).toLowerCase();
+      const desc = getDescription(q).toLowerCase();
       return (
-        String(q.proposal_number || q.proposta_numero || "").toLowerCase().includes(s) ||
+        String(q.proposal_number || "").toLowerCase().includes(s) ||
         String(q.clientName || "").toLowerCase().includes(s) ||
-        info.includes(s)
+        info.includes(s) ||
+        desc.includes(s)
       );
     });
   }, [quotesWithClientNames, searchTerm]);
@@ -253,13 +264,8 @@ export default function Quotes() {
 
       if (!client) {
         const clientName = String(normalizedQuote.client_name || normalizedQuote.clientName || "Cliente");
-        const clientDoc = String(normalizedQuote.client_document || normalizedQuote.clientDoc || "");
-        client = {
-          id: qClientId || qClientIdRaw || "client",
-          name: clientName,
-          nome_razao: clientName,
-          cpf_cnpj: clientDoc,
-        };
+        const clientDoc = String(normalizedQuote.client_document || "");
+        client = { id: qClientId || qClientIdRaw || "client", name: clientName, nome_razao: clientName, cpf_cnpj: clientDoc };
       }
 
       const autor = safeUsers.find((u) => String(u.id) === String(normalizedQuote.user_id)) || null;
@@ -298,7 +304,6 @@ export default function Quotes() {
       if (!result) return null;
       if (typeof result === "string") return result;
       if (result?.url && typeof result.url === "string") return result.url;
-
       const blob = result?.blob instanceof Blob ? result.blob : result instanceof Blob ? result : null;
       if (blob) return URL.createObjectURL(blob);
       return null;
@@ -308,18 +313,12 @@ export default function Quotes() {
       if (action === "print") {
         const result = await generateQuotePDF({ ...previewData, template }, { download: false });
         const url = resultToUrl(result);
-
         if (url) {
           openAndPrintUrl(url);
           return;
         }
-
         await generateQuotePDF({ ...previewData, template });
-
-        toast({
-          title: "PDF gerado",
-          description: "O gerador baixou o PDF, mas não retornou URL/Blob para impressão automática.",
-        });
+        toast({ title: "PDF gerado", description: "O gerador baixou o PDF, mas não retornou URL/Blob para impressão automática." });
         return;
       }
 
@@ -330,6 +329,37 @@ export default function Quotes() {
         title: action === "print" ? "Erro ao imprimir" : "Erro ao gerar PDF",
         description: e?.message || String(e),
       });
+    }
+  };
+
+  // ✅ DESCRIÇÃO: abre editor e salva em notes
+  const openDescriptionEditor = (quote) => {
+    setDescQuote(quote);
+    setDescValue(getDescription(quote));
+    setDescOpen(true);
+  };
+
+  const saveDescription = async () => {
+    if (!descQuote?.id) return;
+    try {
+      setSavingDesc(true);
+      if (typeof updateQuote !== "function") throw new Error("updateQuote não disponível no DataContext.");
+
+      await updateQuote(descQuote.id, { notes: descValue });
+
+      // atualiza UI imediata
+      setLocalQuotes((prev) =>
+        prev.map((q) => (String(q.id) === String(descQuote.id) ? { ...q, notes: descValue } : q))
+      );
+
+      if (typeof reloadQuotes === "function") await reloadQuotes();
+
+      toast({ title: "Descrição salva", description: "A descrição foi atualizada com sucesso." });
+      setDescOpen(false);
+    } catch (e) {
+      toast({ variant: "destructive", title: "Erro ao salvar descrição", description: e?.message || String(e) });
+    } finally {
+      setSavingDesc(false);
     }
   };
 
@@ -358,7 +388,7 @@ export default function Quotes() {
           <div className="relative w-full md:w-1/3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
             <Input
-              placeholder="Buscar por nº, cliente ou info..."
+              placeholder="Buscar por nº, cliente, info ou descrição..."
               className="pl-10 w-full input-field"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -373,6 +403,7 @@ export default function Quotes() {
                 <th className="text-left py-3 px-2">Proposta</th>
                 <th className="text-left py-3 px-2">Cliente</th>
                 <th className="text-left py-3 px-2">Informações</th>
+                <th className="text-left py-3 px-2">Descrição</th>
                 <th className="text-left py-3 px-2">Data</th>
                 <th className="text-right py-3 px-2">Valor</th>
                 <th className="text-left py-3 px-2">Status</th>
@@ -387,13 +418,23 @@ export default function Quotes() {
                   <td className="py-3 px-2 text-slate-200">{quote.clientName}</td>
 
                   <td className="py-3 px-2 text-slate-300">
-                    <div className="max-w-[520px] whitespace-nowrap overflow-hidden text-ellipsis" title={getInfoText(quote)}>
+                    <div className="max-w-[420px] whitespace-nowrap overflow-hidden text-ellipsis" title={getInfoText(quote)}>
                       {getInfoText(quote) || "-"}
                     </div>
                   </td>
 
-                  <td className="py-3 px-2 text-slate-300">{safeFormatDate(quote.created_at)}</td>
+                  <td className="py-3 px-2 text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <div className="max-w-[360px] whitespace-nowrap overflow-hidden text-ellipsis" title={getDescription(quote)}>
+                        {getDescription(quote) || "-"}
+                      </div>
+                      <Button type="button" variant="secondary" className="btn-secondary" onClick={() => openDescriptionEditor(quote)} title="Editar descrição">
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </td>
 
+                  <td className="py-3 px-2 text-slate-300">{safeFormatDate(quote.created_at)}</td>
                   <td className="py-3 px-2 text-right text-slate-200">{formatCurrency(quote.total_value || 0)}</td>
 
                   <td className="py-3 px-2">
@@ -433,9 +474,9 @@ export default function Quotes() {
                         <AlertDialogContent className="glass-effect border-white/20 text-white">
                           <AlertDialogHeader>
                             <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
-                            <AlertDialogDescription className="text-white/70">
+                            <AlertDesc className="text-white/70">
                               Tem certeza que deseja excluir a cotação Nº <b>{quote.proposal_number || "-"}</b>? Esta ação não pode ser desfeita.
-                            </AlertDialogDescription>
+                            </AlertDesc>
                           </AlertDialogHeader>
 
                           <AlertDialogFooter>
@@ -453,7 +494,7 @@ export default function Quotes() {
 
               {filteredQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-500">
+                  <td colSpan={8} className="py-10 text-center text-slate-500">
                     Nenhuma cotação encontrada.
                   </td>
                 </tr>
@@ -464,6 +505,36 @@ export default function Quotes() {
 
         <QuotePDFPreviewDialog isOpen={previewOpen} onClose={() => setPreviewOpen(false)} previewData={previewData} onConfirm={handleConfirmPdf} />
       </div>
+
+      {/* ✅ MODAL EDITAR DESCRIÇÃO */}
+      <Dialog open={descOpen} onOpenChange={setDescOpen}>
+        <DialogContent className="glass-effect border-white/20 text-white max-w-2xl" aria-describedby="desc-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-white">Descrição da Cotação</DialogTitle>
+            <DialogDescription id="desc-dialog" className="text-white/70">
+              Essa descrição será salva no campo <b>notes</b> da cotação (mesmo campo usado no QuoteFormPage).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <Label className="text-white/80">Descrição</Label>
+            <textarea
+              className="input-field min-h-[120px] w-full resize-none"
+              value={descValue}
+              onChange={(e) => setDescValue(e.target.value)}
+              placeholder="Ex: Proposta cliente pediu desconto / instalação + materiais / etc."
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" className="btn-secondary" onClick={() => setDescOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="button" className="btn-primary" onClick={saveDescription} disabled={savingDesc}>
+                {savingDesc ? "Salvando..." : "Salvar"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

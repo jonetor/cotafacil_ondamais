@@ -15,19 +15,40 @@ import QuotePDFPreviewDialog from "@/components/quotes/QuotePDFPreviewDialog";
 import { Input } from "@/components/ui/input";
 import { listSellers } from "@/services/sellers";
 import { useAuth } from "@/contexts/SupabaseAuthContext";
-import { uid } from "@/lib/utils"; // ✅ garante uid nos itens
+import { uid } from "@/lib/utils";
 
 const onlyDigits = (s) => String(s || "").replace(/\D/g, "");
 
-const DEFAULT_COMPANY = {
-  name: "Fibra Onda+ LTDA",
-  razao_social: "Fibra Onda Mais LTDA",
-  nome_fantasia: "Fibra Onda Mais",
-  cnpj: "14.429.925/0001-67",
-  cnpjDigits: "14429925000167",
-};
+// ✅ TROQUE AQUI pelos 3 cadastros reais
+const COMPANY_OPTIONS = [
+  {
+    id: "static:14429925000167",
+    name: "Fibra Onda+ LTDA",
+    razao_social: "Fibra Onda Mais LTDA",
+    nome_fantasia: "Fibra Onda Mais",
+    cnpj: "14.429.925/0001-67",
+    cnpjDigits: "14429925000167",
+  },
+  {
+    id: "static:46322439000131", // <-- troque
+    name: "Onda Mais Tecnologia",
+    razao_social: "Onda Mais Tecnologia LTDA",
+    nome_fantasia: "Onda Mais Tecnologia",
+    cnpj: "46.322.439/0001-31",
+    cnpjDigits: "46322439000131",
+  },
+  {
+    id: "static:44618753000130", // <-- troque
+    name: "S & A Invest",
+    razao_social: "S & A Invest LTDA",
+    nome_fantasia: "S & A Invest",
+    cnpj: "44.618.753/0001-30",
+    cnpjDigits: "44618753000130",
+  },
+];
 
-const DEFAULT_COMPANY_ID = `static:${DEFAULT_COMPANY.cnpjDigits}`;
+const DEFAULT_COMPANY = COMPANY_OPTIONS[0];
+const DEFAULT_COMPANY_ID = DEFAULT_COMPANY.id;
 
 const readClienteFromStorage = () => {
   try {
@@ -67,59 +88,42 @@ function n(v) {
   return Number.isFinite(x) ? x : 0;
 }
 
-/**
- * ✅ NORMALIZA ITENS do BFF para o formato que seu QuoteItemsManager/ItemTable esperam
- * - garante uid
- * - garante item_type (sem isso suas tabelas ficam vazias!)
- * - garante taxes {icms, issqn}
- * - garante números
- */
 function normalizeItems(items) {
   const list = Array.isArray(items) ? items : [];
   return list.map((it) => {
     const quantity = n(it.quantity);
     const unit_price = n(it.unit_price);
-
-    // item_type pode não existir no banco -> default PRODUTO
     const item_type = String(it.item_type || it.type || it.itemType || "PRODUTO").toUpperCase();
-
-    // taxes pode vir em it.taxes (front) ou icms/issqn (banco)
     const icms = n(it.icms ?? it?.taxes?.icms);
     const issqn = n(it.issqn ?? it?.taxes?.issqn);
-
-    const total_price =
-      n(it.total_price) || quantity * unit_price;
+    const total_price = n(it.total_price) || quantity * unit_price;
 
     return {
       ...it,
       uid: it.uid || it.id || uid(),
-      item_type: item_type === "SERVICE" ? "SERVICO" : item_type, // compat
+      item_type: item_type === "SERVICE" ? "SERVICO" : item_type,
       source: it.source || (it.product_id ? "catalog" : "manual"),
       product_id: it.product_id || null,
-
       code: it.code || it.cod || it.codigo || "",
       description: it.description || it.descricao || "",
       unit: it.unit || "un",
-
       quantity,
       unit_price,
       total_price,
-
       icms,
       issqn,
-
-      taxes: {
-        ...(it.taxes || {}),
-        icms,
-        issqn,
-      },
+      taxes: { ...(it.taxes || {}), icms, issqn },
     };
   });
 }
 
+function findCompanyById(id) {
+  const sid = String(id || "");
+  return COMPANY_OPTIONS.find((c) => String(c.id) === sid) || null;
+}
+
 export default function QuoteFormPage() {
-  const { clients, quotes, addQuote, companies, users, user: supabaseUser, addresses, sellers: supabaseSellers } =
-    useData();
+  const { clients, quotes, addQuote, users, user: supabaseUser, addresses, sellers: supabaseSellers } = useData();
 
   const { user: bffUser } = useAuth();
   const { toast } = useToast();
@@ -127,7 +131,6 @@ export default function QuoteFormPage() {
   const location = useLocation();
   const { id } = useParams();
 
-  const safeCompanies = Array.isArray(companies) ? companies : [];
   const safeClients = Array.isArray(clients) ? clients : [];
   const safeQuotes = Array.isArray(quotes) ? quotes : [];
   const safeUsers = Array.isArray(users) ? users : [];
@@ -138,15 +141,6 @@ export default function QuoteFormPage() {
   const [loadingSellers, setLoadingSellers] = useState(false);
 
   const [externalClientOption, setExternalClientOption] = useState(null);
-
-  const [externalCompanyOption, setExternalCompanyOption] = useState({
-    id: DEFAULT_COMPANY_ID,
-    name: `${DEFAULT_COMPANY.name} (${DEFAULT_COMPANY.cnpj})`,
-    cnpj: DEFAULT_COMPANY.cnpj,
-    razao_social: DEFAULT_COMPANY.razao_social,
-    nome_fantasia: DEFAULT_COMPANY.nome_fantasia,
-    addresses: [],
-  });
 
   const [currentQuote, setCurrentQuote] = useState({
     id: null,
@@ -162,7 +156,9 @@ export default function QuoteFormPage() {
     payment_terms: "",
     freight_type: "CIF",
     delivery_location: "",
-    notes: "",
+
+    description: "", // vira notes no payload
+    additional_info: "",
 
     contactPerson: "",
 
@@ -173,30 +169,6 @@ export default function QuoteFormPage() {
   });
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-
-  const openAndPrintUrl = (url) => {
-    const w = window.open(url, "_blank");
-    if (!w) {
-      toast({ variant: "destructive", title: "Pop-up bloqueado", description: "Permita pop-ups para imprimir a cotação." });
-      return;
-    }
-    w.onload = () => {
-      try {
-        w.focus();
-        w.print();
-      } catch {}
-    };
-  };
-
-  const normalizePdfResultToUrl = (result) => {
-    if (!result) return null;
-    if (typeof result === "string") return result;
-    if (result?.url && typeof result.url === "string") return result.url;
-
-    const blob = result?.blob instanceof Blob ? result.blob : result instanceof Blob ? result : null;
-    if (blob) return URL.createObjectURL(blob);
-    return null;
-  };
 
   // LOAD SELLERS
   useEffect(() => {
@@ -216,87 +188,58 @@ export default function QuoteFormPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ INIT QUOTE (corrigido: preload -> GET /api/quotes/:id -> fallback safeQuotes)
+  // INIT QUOTE (edit preload)
   useEffect(() => {
     const userId = supabaseUser?.id || "";
 
     async function loadEditQuote() {
       if (!id) return;
 
-      try {
-        // 1) veio da lista (navigate com state.quote)
-        const preload = location.state?.quote;
-        if (preload) {
-          setCurrentQuote((prev) => ({
-            ...prev,
-            ...preload,
-            user_id: userId,
-            items: normalizeItems(preload.items),
-            company_id: String(preload.company_id || DEFAULT_COMPANY_ID),
+      const preload = location.state?.quote;
+      if (preload) {
+        setCurrentQuote((prev) => ({
+          ...prev,
+          ...preload,
+          user_id: userId,
+          items: normalizeItems(preload.items),
+          company_id: String(preload.company_id || DEFAULT_COMPANY_ID),
 
-            validity_date: safeText(preload.validity_date),
-            payment_terms: safeText(preload.payment_terms),
-            freight_type: safeText(preload.freight_type) || "CIF",
-            delivery_location: safeText(preload.delivery_location),
-            notes: safeText(preload.notes),
+          validity_date: safeText(preload.validity_date),
+          payment_terms: safeText(preload.payment_terms),
+          freight_type: safeText(preload.freight_type) || "CIF",
+          delivery_location: safeText(preload.delivery_location),
 
-            contactPerson: safeText(preload.contact_person || preload.contactPerson || prev.contactPerson),
-          }));
-          return;
-        }
+          description: safeText(preload.description || preload.notes || ""),
+          additional_info: safeText(preload.additional_info || preload.additionalInfo || ""),
 
-        // 2) fallback: busca no backend (cotação completa com itens)
-        const resp = await fetch(`/api/quotes/${id}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          setCurrentQuote((prev) => ({
-            ...prev,
-            ...data,
-            user_id: userId,
-            items: normalizeItems(data.items),
-            company_id: String(data.company_id || DEFAULT_COMPANY_ID),
+          contactPerson: safeText(preload.contact_person || preload.contactPerson || prev.contactPerson),
+        }));
+        return;
+      }
 
-            validity_date: safeText(data.validity_date),
-            payment_terms: safeText(data.payment_terms),
-            freight_type: safeText(data.freight_type) || "CIF",
-            delivery_location: safeText(data.delivery_location),
-            notes: safeText(data.notes),
+      // fallback: pega da lista
+      const quote = safeQuotes.find((q) => String(q?.id) === String(id));
+      if (quote) {
+        setCurrentQuote((prev) => ({
+          ...prev,
+          ...quote,
+          user_id: userId,
+          items: normalizeItems(quote.items),
+          company_id: String(quote.company_id || DEFAULT_COMPANY_ID),
 
-            contactPerson: safeText(data.contact_person || data.contactPerson || prev.contactPerson),
-          }));
-          return;
-        }
+          validity_date: safeText(quote.validity_date),
+          payment_terms: safeText(quote.payment_terms),
+          freight_type: safeText(quote.freight_type) || "CIF",
+          delivery_location: safeText(quote.delivery_location),
 
-        // 3) fallback antigo (lista local do contexto)
-        const quote = safeQuotes.find((q) => String(q?.id) === String(id));
-        if (quote) {
-          setCurrentQuote((prev) => ({
-            ...prev,
-            ...quote,
-            user_id: userId,
-            items: normalizeItems(quote.items),
-            company_id: String(quote.company_id || DEFAULT_COMPANY_ID),
+          description: safeText(quote.description || quote.notes || ""),
+          additional_info: safeText(quote.additional_info || quote.additionalInfo || ""),
 
-            validity_date: safeText(quote.validity_date),
-            payment_terms: safeText(quote.payment_terms),
-            freight_type: safeText(quote.freight_type) || "CIF",
-            delivery_location: safeText(quote.delivery_location),
-            notes: safeText(quote.notes),
-
-            contactPerson: safeText(quote.contact_person || quote.contactPerson || prev.contactPerson),
-          }));
-        }
-      } catch (e) {
-        console.error("Erro ao carregar cotação:", e);
-        toast({
-          variant: "destructive",
-          title: "Erro ao carregar cotação",
-          description: String(e?.message || e),
-        });
+          contactPerson: safeText(quote.contact_person || quote.contactPerson || prev.contactPerson),
+        }));
       }
     }
 
-    // modo criar
     if (!id) {
       setCurrentQuote((prev) => ({
         ...prev,
@@ -307,7 +250,6 @@ export default function QuoteFormPage() {
       return;
     }
 
-    // modo editar
     loadEditQuote();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, supabaseUser, location.state, safeQuotes]);
@@ -323,35 +265,7 @@ export default function QuoteFormPage() {
     });
   }, [bffUser, id]);
 
-  // EMPRESA FIXA (fallback)
-  useEffect(() => {
-    if (!safeCompanies.length) {
-      setCurrentQuote((prev) => ({ ...prev, company_id: String(prev.company_id || DEFAULT_COMPANY_ID) }));
-      return;
-    }
-
-    const found =
-      safeCompanies.find((c) => onlyDigits(c?.cnpj) === DEFAULT_COMPANY.cnpjDigits) ||
-      safeCompanies.find((c) => String(c?.name || "").toLowerCase().includes("fibra onda"));
-
-    if (found) {
-      setExternalCompanyOption(null);
-      setCurrentQuote((prev) => ({ ...prev, company_id: String(found.id) }));
-    } else {
-      const tmp = {
-        id: DEFAULT_COMPANY_ID,
-        name: `${DEFAULT_COMPANY.name} (${DEFAULT_COMPANY.cnpj})`,
-        cnpj: DEFAULT_COMPANY.cnpj,
-        razao_social: DEFAULT_COMPANY.razao_social,
-        nome_fantasia: DEFAULT_COMPANY.nome_fantasia,
-        addresses: [],
-      };
-      setExternalCompanyOption(tmp);
-      setCurrentQuote((prev) => ({ ...prev, company_id: String(tmp.id) }));
-    }
-  }, [safeCompanies]);
-
-  // RECEBER CLIENTE (1 vez e limpa state/storage)
+  // RECEBER CLIENTE
   useEffect(() => {
     const cli = location.state?.cliente || readClienteFromStorage();
     if (!cli) return;
@@ -397,10 +311,7 @@ export default function QuoteFormPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key, safeClients]);
 
-  // HANDLERS
-  const handleItemsChange = (newItems) =>
-    setCurrentQuote((prev) => ({ ...prev, items: normalizeItems(newItems) })); // ✅ garante que edições também mantenham formato
-
+  const handleItemsChange = (newItems) => setCurrentQuote((prev) => ({ ...prev, items: normalizeItems(newItems) }));
   const handleInputChange = (e) => setCurrentQuote((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleSelectChange = (name, value) => {
@@ -427,68 +338,37 @@ export default function QuoteFormPage() {
     }
   };
 
+  const handleSelectCompany = (companyId) => {
+    const c = findCompanyById(companyId);
+    if (!c) return;
+    setCurrentQuote((prev) => ({ ...prev, company_id: String(c.id) }));
+  };
+
   const handleSelectClient = () => {
     const returnTo = `${location.pathname}${location.search || ""}`;
     navigate(`/clientes?returnTo=${encodeURIComponent(returnTo)}`);
   };
 
-  // ITENS / TOTAIS
-  const productItems = useMemo(
-    () => (Array.isArray(currentQuote.items) ? currentQuote.items : []).filter((i) => i.item_type === "PRODUTO"),
-    [currentQuote.items]
-  );
-
-  const serviceItems = useMemo(
-    () => (Array.isArray(currentQuote.items) ? currentQuote.items : []).filter((i) => i.item_type === "SERVICO"),
-    [currentQuote.items]
-  );
-
-  const scmServiceItems = useMemo(
-    () => (Array.isArray(currentQuote.items) ? currentQuote.items : []).filter((i) => i.item_type === "SERVICO_SCM"),
-    [currentQuote.items]
-  );
+  const productItems = useMemo(() => (currentQuote.items || []).filter((i) => i.item_type === "PRODUTO"), [currentQuote.items]);
+  const serviceItems = useMemo(() => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO"), [currentQuote.items]);
+  const scmServiceItems = useMemo(() => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO_SCM"), [currentQuote.items]);
 
   const totais = useMemo(() => {
     const items = Array.isArray(currentQuote.items) ? currentQuote.items : [];
-
     const subtotalProdutos = productItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
     const subtotalServicos = serviceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
     const subtotalScm = scmServiceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
-
     const totalTributos = items.reduce((acc, item) => {
       const taxes = item.taxes || {};
-      // se você não usa total_tributos_item, deixa como 0 (não quebra)
       return acc + n(taxes.total_tributos_item || 0);
     }, 0);
-
     const totalGeral = subtotalProdutos + subtotalServicos + subtotalScm;
     return { subtotalProdutos, subtotalServicos, subtotalScm, totalTributos, totalGeral };
   }, [productItems, serviceItems, scmServiceItems, currentQuote.items]);
 
-  // LISTS
-  const companiesSelectList = useMemo(() => {
-    const list = [...safeCompanies];
-    if (externalCompanyOption && !list.some((c) => String(c.id) === String(externalCompanyOption.id))) {
-      list.unshift(externalCompanyOption);
-    }
-    if (!list.length) {
-      list.unshift({
-        id: DEFAULT_COMPANY_ID,
-        name: `${DEFAULT_COMPANY.name} (${DEFAULT_COMPANY.cnpj})`,
-        cnpj: DEFAULT_COMPANY.cnpj,
-        razao_social: DEFAULT_COMPANY.razao_social,
-        nome_fantasia: DEFAULT_COMPANY.nome_fantasia,
-        addresses: [],
-      });
-    }
-    return list;
-  }, [safeCompanies, externalCompanyOption]);
-
   const clientsSelectList = useMemo(() => {
     const list = [...safeClients];
-    if (externalClientOption && !list.some((c) => String(c.id) === String(externalClientOption.id))) {
-      list.unshift(externalClientOption);
-    }
+    if (externalClientOption && !list.some((c) => String(c.id) === String(externalClientOption.id))) list.unshift(externalClientOption);
     return list;
   }, [safeClients, externalClientOption]);
 
@@ -497,25 +377,11 @@ export default function QuoteFormPage() {
     return safeSupabaseSellers;
   }, [bffSellers, safeSupabaseSellers]);
 
-  // PDF PREVIEW DATA
+  const selectedCompany = useMemo(() => findCompanyById(currentQuote.company_id) || DEFAULT_COMPANY, [currentQuote.company_id]);
+
   const pdfPreviewData = useMemo(() => {
-    const company =
-      safeCompanies.find((c) => String(c.id) === String(currentQuote.company_id)) ||
-      externalCompanyOption ||
-      {
-        id: DEFAULT_COMPANY_ID,
-        name: DEFAULT_COMPANY.name,
-        cnpj: DEFAULT_COMPANY.cnpj,
-        razao_social: DEFAULT_COMPANY.razao_social,
-        nome_fantasia: DEFAULT_COMPANY.nome_fantasia,
-        addresses: [],
-      };
-
-    const client =
-      safeClients.find((c) => String(c.id) === String(currentQuote.client_id)) || (externalClientOption || null);
-
+    const client = safeClients.find((c) => String(c.id) === String(currentQuote.client_id)) || externalClientOption || null;
     const autor = safeUsers.find((u) => String(u.id) === String(currentQuote.user_id));
-
     const vendedor =
       (bffSellers || []).find((u) => String(u.id) === String(currentQuote.seller_id)) ||
       (safeSupabaseSellers || []).find((s) => String(s.id) === String(currentQuote.seller_id));
@@ -528,32 +394,23 @@ export default function QuoteFormPage() {
         subtotal_produtos: totais.subtotalProdutos,
         subtotal_servicos: totais.subtotalServicos,
         subtotal_scm: totais.subtotalScm,
+        // ✅ garante descrição/infos no PDF
+        description: safeText(currentQuote.description),
+        additional_info: safeText(currentQuote.additional_info),
+        notes: safeText(currentQuote.description), // compat com gerador
       },
-      company: company ? { ...company, addresses: safeAddresses.filter((addr) => addr.company_id === company.id) } : null,
+      company: {
+        id: selectedCompany.id,
+        name: selectedCompany.name,
+        razao_social: selectedCompany.razao_social,
+        nome_fantasia: selectedCompany.nome_fantasia,
+        cnpj: selectedCompany.cnpj,
+      },
       client: client ? { ...client, addresses: safeAddresses.filter((addr) => addr.client_id === client.id) } : null,
       vendedor,
       autor,
     };
-  }, [
-    currentQuote,
-    totais,
-    safeCompanies,
-    safeClients,
-    safeUsers,
-    safeAddresses,
-    safeSupabaseSellers,
-    bffSellers,
-    externalClientOption,
-    externalCompanyOption,
-  ]);
-
-  const validatePdfData = () => {
-    if (!pdfPreviewData.company || !pdfPreviewData.client) {
-      toast({ variant: "destructive", title: "Dados incompletos", description: "Selecione empresa e cliente para gerar o PDF." });
-      return false;
-    }
-    return true;
-  };
+  }, [currentQuote, totais, selectedCompany, safeClients, externalClientOption, safeAddresses, safeUsers, bffSellers, safeSupabaseSellers]);
 
   const handleOpenPreview = () => {
     if (!currentQuote.client_id) {
@@ -565,28 +422,21 @@ export default function QuoteFormPage() {
 
   const handlePdfConfirm = async (template, meta) => {
     const action = meta?.action || "download";
-    if (!validatePdfData()) return;
-
-    const payload = { ...pdfPreviewData, template };
-
     try {
       if (action === "print") {
-        const result = await generateQuotePDF(payload, { download: false });
-        const url = normalizePdfResultToUrl(result);
-        if (url) openAndPrintUrl(url);
-        else {
-          await generateQuotePDF(payload);
-          toast({ title: "PDF gerado", description: "O gerador baixou o PDF, mas não retornou URL/Blob para impressão automática." });
+        const result = await generateQuotePDF({ ...pdfPreviewData, template }, { download: false });
+        const url = typeof result === "string" ? result : result?.url ? result.url : result instanceof Blob ? URL.createObjectURL(result) : null;
+        if (url) {
+          openAndPrintUrl(url);
+          return;
         }
-        return;
       }
-      await generateQuotePDF(payload);
+      await generateQuotePDF({ ...pdfPreviewData, template });
     } catch (e) {
-      toast({ variant: "destructive", title: action === "print" ? "Erro ao imprimir" : "Erro ao gerar PDF", description: e?.message || String(e) });
+      toast({ variant: "destructive", title: "Erro ao gerar PDF", description: e?.message || String(e) });
     }
   };
 
-  // ✅ SUBMIT -> SALVA NO BFF (via addQuote do DataContext atualizado)
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -598,29 +448,23 @@ export default function QuoteFormPage() {
     if (!fixedCompanyId.trim()) missing.push("Empresa");
     if (!fixedClientId.trim()) missing.push("Cliente");
     if (!fixedSellerId.trim()) missing.push("Vendedor");
-
     if (missing.length) {
       toast({ variant: "destructive", title: "Campos obrigatórios", description: `Faltando: ${missing.join(", ")}.` });
       return;
     }
 
-    const isExternalCompany = fixedCompanyId.startsWith("static:");
-    const isExternalClient = fixedClientId.startsWith("voalle:");
-
-    const companyName = safeText(DEFAULT_COMPANY.name);
-    const companyDoc = safeText(DEFAULT_COMPANY.cnpj);
+    const c = findCompanyById(fixedCompanyId) || DEFAULT_COMPANY;
 
     const clientName =
-      safeClients.find((c) => String(c.id) === fixedClientId)?.name ||
-      safeClients.find((c) => String(c.id) === fixedClientId)?.nome_razao ||
+      safeClients.find((cli) => String(cli.id) === fixedClientId)?.name ||
+      safeClients.find((cli) => String(cli.id) === fixedClientId)?.nome_razao ||
       safeText(externalClientOption?.name || externalClientOption?.nome_razao || "");
 
     const clientDoc =
-      safeClients.find((c) => String(c.id) === fixedClientId)?.cpf_cnpj ||
-      safeClients.find((c) => String(c.id) === fixedClientId)?.txIdFormated ||
+      safeClients.find((cli) => String(cli.id) === fixedClientId)?.cpf_cnpj ||
+      safeClients.find((cli) => String(cli.id) === fixedClientId)?.txIdFormated ||
       safeText(externalClientOption?.cpf_cnpj || externalClientOption?.txIdFormated || externalClientOption?.txId || "");
 
-    // ✅ payload no formato do DB do BFF (snake_case)
     const quotePayload = {
       id: currentQuote.id || undefined,
 
@@ -635,15 +479,10 @@ export default function QuoteFormPage() {
       seller_id: fixedSellerId,
 
       company_id: fixedCompanyId,
+      company_name: safeText(c.name),
+      company_document: safeText(c.cnpj),
+
       client_id: fixedClientId,
-
-      company_source: isExternalCompany ? "static" : "internal",
-      client_source: isExternalClient ? "voalle" : "internal",
-      client_external_id: isExternalClient ? String(fixedClientId.replace("voalle:", "")) : "",
-
-      company_name: companyName,
-      company_document: companyDoc,
-
       client_name: safeText(clientName),
       client_document: safeText(clientDoc),
 
@@ -653,7 +492,12 @@ export default function QuoteFormPage() {
       payment_terms: safeText(currentQuote.payment_terms),
       freight_type: safeText(currentQuote.freight_type),
       delivery_location: safeText(currentQuote.delivery_location),
-      notes: safeText(currentQuote.notes),
+
+      // ✅ descrição vai para notes (sem mexer no banco)
+      notes: safeText(currentQuote.description),
+
+      // ✅ infos adicionais (se backend não salvar ainda, pelo menos vai pro PDF e pra edição via state)
+      additional_info: safeText(currentQuote.additional_info),
 
       total_value: Number(totais.totalGeral || 0),
 
@@ -674,13 +518,9 @@ export default function QuoteFormPage() {
     };
 
     try {
-      const saved = await addQuote(quotePayload); // ✅ vai pro BFF
+      const saved = await addQuote(quotePayload);
       toast({ title: currentQuote.id ? "Cotação atualizada!" : "Cotação criada!", description: "A cotação foi salva com sucesso." });
-
-      if (saved?.id && !currentQuote.id) {
-        setCurrentQuote((prev) => ({ ...prev, id: saved.id }));
-      }
-
+      if (saved?.id && !currentQuote.id) setCurrentQuote((prev) => ({ ...prev, id: saved.id }));
       navigate("/cotacoes");
     } catch (error) {
       toast({ variant: "destructive", title: "Erro ao Salvar", description: String(error?.message || error) });
@@ -705,14 +545,7 @@ export default function QuoteFormPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="btn-secondary"
-              onClick={handleOpenPreview}
-              disabled={!canOpenPdf}
-              title={!canOpenPdf ? "Selecione um cliente para gerar o PDF" : "Gerar PDF"}
-            >
+            <Button type="button" variant="outline" className="btn-secondary" onClick={handleOpenPreview} disabled={!canOpenPdf}>
               <FileDown className="w-4 h-4 mr-2" />
               Gerar PDF
             </Button>
@@ -725,23 +558,25 @@ export default function QuoteFormPage() {
         </div>
 
         <div className="floating-card p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* ✅ EMPRESA (3 opções) */}
           <div>
             <Label htmlFor="company_id">Empresa Emitente</Label>
-            <Select value={String(currentQuote.company_id || "")} disabled>
+            <Select value={String(currentQuote.company_id || "")} onValueChange={handleSelectCompany}>
               <SelectTrigger className="input-field">
                 <Building className="w-4 h-4 mr-2 opacity-60" />
-                <SelectValue placeholder="Empresa emitente" />
+                <SelectValue placeholder="Selecione a empresa" />
               </SelectTrigger>
               <SelectContent className="glass-effect">
-                {companiesSelectList.map((c) => (
+                {COMPANY_OPTIONS.map((c) => (
                   <SelectItem key={c.id} value={String(c.id)}>
-                    {c.name}
+                    {c.name} ({c.cnpj})
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
+          {/* CLIENTE */}
           <div>
             <Label htmlFor="client_id">Cliente</Label>
             <div className="flex items-center gap-2">
@@ -767,6 +602,7 @@ export default function QuoteFormPage() {
             </div>
           </div>
 
+          {/* VENDEDOR */}
           <div>
             <Label htmlFor="seller_id">Vendedor</Label>
             <Select value={String(currentQuote.seller_id || "")} onValueChange={(v) => handleSelectChange("seller_id", v)}>
@@ -787,13 +623,7 @@ export default function QuoteFormPage() {
 
           <div className="md:col-span-3">
             <Label htmlFor="contactPerson">Aos Cuidados de (Contato no Cliente)</Label>
-            <Input
-              name="contactPerson"
-              value={currentQuote.contactPerson}
-              onChange={handleInputChange}
-              className="input-field"
-              placeholder="Nome do contato principal no cliente"
-            />
+            <Input name="contactPerson" value={currentQuote.contactPerson} onChange={handleInputChange} className="input-field" />
           </div>
         </div>
 
@@ -807,12 +637,51 @@ export default function QuoteFormPage() {
           />
         </div>
 
+        <div className="floating-card p-6">
+          <Label htmlFor="description">Descrição da Cotação</Label>
+          <textarea
+            name="description"
+            value={currentQuote.description}
+            onChange={handleInputChange}
+            className="input-field min-h-[110px] w-full resize-none"
+            placeholder="Ex: Proposta para instalação + materiais; condições especiais..."
+          />
+        </div>
+
+        <div className="floating-card p-6">
+          <Label htmlFor="additional_info">Informações adicionais</Label>
+          <textarea
+            name="additional_info"
+            value={currentQuote.additional_info}
+            onChange={handleInputChange}
+            className="input-field min-h-[110px] w-full resize-none"
+            placeholder="Ex: Prazo, garantias, detalhes técnicos..."
+          />
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="floating-card p-6">
-            <div className="text-white/70 text-sm">Observação: “Aos cuidados” é salvo no campo contact_person do BFF.</div>
+            <QuoteTotals totais={totais} />
           </div>
           <div className="floating-card p-6">
-            <QuoteTotals totais={totais} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="validity_date">Validade (dias)</Label>
+                <Input name="validity_date" value={currentQuote.validity_date} onChange={handleInputChange} className="input-field" />
+              </div>
+              <div>
+                <Label htmlFor="payment_terms">Condições de pagamento</Label>
+                <Input name="payment_terms" value={currentQuote.payment_terms} onChange={handleInputChange} className="input-field" />
+              </div>
+              <div>
+                <Label htmlFor="freight_type">Tipo de frete</Label>
+                <Input name="freight_type" value={currentQuote.freight_type} onChange={handleInputChange} className="input-field" />
+              </div>
+              <div>
+                <Label htmlFor="delivery_location">Local de entrega</Label>
+                <Input name="delivery_location" value={currentQuote.delivery_location} onChange={handleInputChange} className="input-field" />
+              </div>
+            </div>
           </div>
         </div>
       </motion.form>
