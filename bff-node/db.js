@@ -70,164 +70,196 @@ function ensureProductsSchema() {
 }
 
 export function initDb() {
-
   db.exec(`
+    CREATE TABLE IF NOT EXISTS voalle_clients (
+      id TEXT PRIMARY KEY,
+      cpf_cnpj TEXT,
+      cpf_cnpj_digits TEXT,
+      nome_razao TEXT,
+      nome_fantasia TEXT,
+      email TEXT,
+      telefone TEXT,
+      city TEXT,
+      state TEXT,
+      raw_json TEXT,
+      updated_at INTEGER
+    );
 
-  CREATE TABLE IF NOT EXISTS voalle_clients (
-    id TEXT PRIMARY KEY,
-    cpf_cnpj TEXT,
-    cpf_cnpj_digits TEXT,
-    nome_razao TEXT,
-    nome_fantasia TEXT,
-    email TEXT,
-    telefone TEXT,
-    city TEXT,
-    state TEXT,
-    raw_json TEXT,
-    updated_at INTEGER
-  );
+    CREATE INDEX IF NOT EXISTS idx_voalle_clients_doc_digits
+      ON voalle_clients(cpf_cnpj_digits);
 
-  CREATE INDEX IF NOT EXISTS idx_voalle_clients_doc_digits
-  ON voalle_clients(cpf_cnpj_digits);
+    CREATE INDEX IF NOT EXISTS idx_voalle_clients_nome_razao
+      ON voalle_clients(nome_razao);
 
-  CREATE INDEX IF NOT EXISTS idx_voalle_clients_nome_razao
-  ON voalle_clients(nome_razao);
+    CREATE INDEX IF NOT EXISTS idx_voalle_clients_nome_fantasia
+      ON voalle_clients(nome_fantasia);
 
-  CREATE INDEX IF NOT EXISTS idx_voalle_clients_nome_fantasia
-  ON voalle_clients(nome_fantasia);
+    CREATE TABLE IF NOT EXISTS auth_users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'seller',
+      password_hash TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
 
+    CREATE TABLE IF NOT EXISTS budgets (
+      id TEXT PRIMARY KEY,
+      customer_id TEXT,
+      customer_name TEXT,
 
+      status TEXT NOT NULL DEFAULT 'draft',
 
-  CREATE TABLE IF NOT EXISTS auth_users (
-    id TEXT PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'seller',
-    password_hash TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
+      notes TEXT,
 
+      seller_id TEXT,
+      seller_name TEXT,
+      seller_email TEXT,
 
+      subtotal REAL NOT NULL DEFAULT 0,
+      discount_total REAL NOT NULL DEFAULT 0,
+      tax_total REAL NOT NULL DEFAULT 0,
+      freight_total REAL NOT NULL DEFAULT 0,
+      total REAL NOT NULL DEFAULT 0,
 
-  CREATE TABLE IF NOT EXISTS budgets (
-    id TEXT PRIMARY KEY,
-    customer_id TEXT,
-    customer_name TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
 
-    status TEXT NOT NULL DEFAULT 'draft',
+    CREATE INDEX IF NOT EXISTS idx_budgets_created_at
+      ON budgets(created_at);
 
-    notes TEXT,
+    CREATE INDEX IF NOT EXISTS idx_budgets_customer_id
+      ON budgets(customer_id);
 
-    seller_id TEXT,
-    seller_name TEXT,
-    seller_email TEXT,
+    CREATE TABLE IF NOT EXISTS products (
+      id TEXT PRIMARY KEY,
 
-    subtotal REAL NOT NULL DEFAULT 0,
-    discount_total REAL NOT NULL DEFAULT 0,
-    tax_total REAL NOT NULL DEFAULT 0,
-    freight_total REAL NOT NULL DEFAULT 0,
-    total REAL NOT NULL DEFAULT 0,
+      cod TEXT,
+      description TEXT,
+      type TEXT,
+      unit TEXT,
 
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
+      sale_price REAL DEFAULT 0,
+      stock_quantity REAL DEFAULT 0,
 
-  CREATE INDEX IF NOT EXISTS idx_budgets_created_at
-  ON budgets(created_at);
+      active INTEGER NOT NULL DEFAULT 1,
 
-  CREATE INDEX IF NOT EXISTS idx_budgets_customer_id
-  ON budgets(customer_id);
+      source TEXT NOT NULL DEFAULT 'manual',
 
+      use TEXT,
+      original_price REAL,
+      payment_form TEXT,
+      payment_form_code TEXT,
 
+      is_loyalty INTEGER,
+      loyalty_price REAL,
+      loyalty_months INTEGER,
 
-  CREATE TABLE IF NOT EXISTS products (
-    id TEXT PRIMARY KEY,
+      campaign_code TEXT,
+      campaign_title TEXT,
 
-    cod TEXT,
-    description TEXT,
-    type TEXT,
-    unit TEXT,
+      price_list_id INTEGER,
+      price_list_code TEXT,
+      price_list_title TEXT,
 
-    sale_price REAL DEFAULT 0,
-    stock_quantity REAL DEFAULT 0,
+      raw_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
 
-    active INTEGER NOT NULL DEFAULT 1,
+    CREATE INDEX IF NOT EXISTS idx_products_cod
+      ON products(cod);
 
-    source TEXT NOT NULL DEFAULT 'manual',
+    CREATE INDEX IF NOT EXISTS idx_products_source
+      ON products(source);
 
-    use TEXT,
-    original_price REAL,
-    payment_form TEXT,
-    payment_form_code TEXT,
+    CREATE INDEX IF NOT EXISTS idx_products_type
+      ON products(type);
 
-    is_loyalty INTEGER,
-    loyalty_price REAL,
-    loyalty_months INTEGER,
+    CREATE INDEX IF NOT EXISTS idx_products_use
+      ON products(use);
 
-    campaign_code TEXT,
-    campaign_title TEXT,
+    CREATE TABLE IF NOT EXISTS budget_items (
+      id TEXT PRIMARY KEY,
 
-    price_list_id INTEGER,
-    price_list_code TEXT,
-    price_list_title TEXT,
+      budget_id TEXT NOT NULL,
 
-    raw_json TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
+      product_id TEXT,
 
-  CREATE INDEX IF NOT EXISTS idx_products_cod
-  ON products(cod);
+      item_type TEXT,
 
-  CREATE INDEX IF NOT EXISTS idx_products_source
-  ON products(source);
+      code TEXT,
+      description TEXT,
 
-  CREATE INDEX IF NOT EXISTS idx_products_type
-  ON products(type);
+      unit TEXT,
 
-  CREATE INDEX IF NOT EXISTS idx_products_use
-  ON products(use);
+      quantity REAL NOT NULL DEFAULT 1,
 
+      unit_price REAL NOT NULL DEFAULT 0,
 
+      total_price REAL NOT NULL DEFAULT 0,
 
-  CREATE TABLE IF NOT EXISTS budget_items (
+      tax_percent REAL DEFAULT 0,
 
-    id TEXT PRIMARY KEY,
+      stock_quantity REAL DEFAULT 0,
 
-    budget_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
 
-    product_id TEXT,
+    CREATE INDEX IF NOT EXISTS idx_budget_items_budget
+      ON budget_items(budget_id);
 
-    item_type TEXT,
+    CREATE INDEX IF NOT EXISTS idx_budget_items_product
+      ON budget_items(product_id);
+  `);
 
-    code TEXT,
-    description TEXT,
+  // ✅ FISCAL (DF-e) - tabelas para import/sync (upload admin / sync por NSU)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS fiscal_companies (
+      id TEXT PRIMARY KEY,
+      cnpj TEXT NOT NULL,
+      cnpj_digits TEXT NOT NULL UNIQUE,
+      name TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fiscal_companies_cnpj_digits
+      ON fiscal_companies(cnpj_digits);
 
-    unit TEXT,
+    CREATE TABLE IF NOT EXISTS dfe_cursor (
+      company_id TEXT NOT NULL,
+      doc_type TEXT NOT NULL,         -- NFE|CTE|MDFE
+      last_nsu INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (company_id, doc_type),
+      FOREIGN KEY (company_id) REFERENCES fiscal_companies(id) ON DELETE CASCADE
+    );
 
-    quantity REAL NOT NULL DEFAULT 1,
+    CREATE TABLE IF NOT EXISTS fiscal_documents (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      doc_type TEXT NOT NULL,         -- NFE|CTE|MDFE
+      nsu INTEGER NOT NULL,
+      chave TEXT,
+      schema TEXT,
+      emit_cnpj TEXT,
+      dest_cnpj TEXT,
+      dh_emi TEXT,
+      valor REAL,
+      resumo_xml TEXT,
+      xml_completo TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(company_id, doc_type, nsu),
+      FOREIGN KEY (company_id) REFERENCES fiscal_companies(id) ON DELETE CASCADE
+    );
 
-    unit_price REAL NOT NULL DEFAULT 0,
-
-    total_price REAL NOT NULL DEFAULT 0,
-
-    tax_percent REAL DEFAULT 0,
-
-    stock_quantity REAL DEFAULT 0,
-
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_budget_items_budget
-  ON budget_items(budget_id);
-
-  CREATE INDEX IF NOT EXISTS idx_budget_items_product
-  ON budget_items(product_id);
-
+    CREATE INDEX IF NOT EXISTS idx_fiscal_docs_company_type_date
+      ON fiscal_documents(company_id, doc_type, dh_emi);
   `);
 
   ensureAuthUsersSchema();

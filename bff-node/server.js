@@ -15,11 +15,21 @@ import quotesRoutes from "./api/quotes.js";
 
 import { initQuotesDb } from "./quotesDb.js";
 
+import fiscalRoutes from "./api/fiscal.js";
+import fiscalImportRoutes from "./api/fiscalImport.js";
+
+
+
+
 const app = express();
 
 /* ===============================
    CORS
 ================================ */
+
+app.use("/api", fiscalRoutes);
+app.use("/api", fiscalImportRoutes);
+
 
 app.use(
   cors({

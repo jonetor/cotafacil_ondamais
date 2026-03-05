@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resNFe xmlns="http://www.portalfiscal.inf.br/nfe">
+  <chNFe>35190100000000000123550010000000011000000010</chNFe>
+  <CNPJ>12345678000199</CNPJ>
+  <xNome>EMPRESA EMITENTE TESTE LTDA</xNome>
+  <IE>110042490114</IE>
+  <dhEmi>2026-03-05T10:00:00-03:00</dhEmi>
+  <tpNF>1</tpNF>
+  <vNF>199.90</vNF>
+  <digVal>AAAAAA==</digVal>
+  <dhRecbto>2026-03-05T10:01:00-03:00</dhRecbto>
+  <nProt>000000000000000</nProt>
+  <cSitNFe>1</cSitNFe>
+  <CNPJDest>14429925000167</CNPJDest>
+</resNFe>
