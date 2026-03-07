@@ -1,34 +1,39 @@
 // src/components/fiscal/NFeManager.jsx
-import React, { useEffect, useState } from "react";
-import { useData } from "@/contexts/SupabaseDataContext";
+import React, { useEffect, useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import NFeRecebidas from "@/components/fiscal/nfe/NFeRecebidas";
 import { FileText, Settings, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { supabase } from "@/lib/customSupabaseClient";
 import { useToast } from "@/components/ui/use-toast";
 
+import NFeRecebidas from "@/components/fiscal/nfe/NFeRecebidas";
+import { STATIC_COMPANIES } from "@/data/staticCompanies";
+
 const NFeManager = () => {
-  const { companies } = useData();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState("recebidas");
-  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState(""); // ✅ será o cnpjDigits
   const [hasActiveCert, setHasActiveCert] = useState(false);
   const [isLoadingCertStatus, setIsLoadingCertStatus] = useState(false);
 
+  const selectedCompany = useMemo(
+    () => STATIC_COMPANIES.find((c) => c.id === selectedCompanyId) || null,
+    [selectedCompanyId]
+  );
+
   // Seleciona a primeira empresa automaticamente
   useEffect(() => {
-    if (companies && companies.length > 0 && !selectedCompanyId) {
-      setSelectedCompanyId(companies[0].id);
+    if (!selectedCompanyId && STATIC_COMPANIES.length > 0) {
+      setSelectedCompanyId(STATIC_COMPANIES[0].id);
     }
-  }, [companies, selectedCompanyId]);
+  }, [selectedCompanyId]);
 
-  // Verifica se existe certificado ativo para a empresa selecionada
+  // Verifica certificado ativo (se sua tabela usa company_id = cnpjDigits)
   useEffect(() => {
     const checkCertificate = async () => {
       if (!selectedCompanyId) {
@@ -41,7 +46,7 @@ const NFeManager = () => {
       const { data, error } = await supabase
         .from("nfe_certificates")
         .select("id")
-        .eq("company_id", selectedCompanyId)
+        .eq("company_id", selectedCompanyId) // ✅ company_id = cnpjDigits
         .eq("active", true)
         .limit(1);
 
@@ -75,7 +80,9 @@ const NFeManager = () => {
           <FileText className="h-5 w-5" />
           Gerenciador de NF-e
         </CardTitle>
-        <CardDescription>Consulte e sincronize documentos fiscais eletrônicos.</CardDescription>
+        <CardDescription>
+          Consulta e sincronização para os CNPJs definidos (lista fixa).
+        </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4">
@@ -85,13 +92,19 @@ const NFeManager = () => {
               <SelectValue placeholder="Selecione uma empresa" />
             </SelectTrigger>
             <SelectContent>
-              {(companies || []).map((company) => (
+              {STATIC_COMPANIES.map((company) => (
                 <SelectItem key={company.id} value={company.id}>
-                  {company.name}
+                  {company.name} — {company.cnpj}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+
+          {selectedCompany ? (
+            <div className="mt-2 text-xs opacity-70">
+              Razão: <b>{selectedCompany.razao_social}</b> | Fantasia: <b>{selectedCompany.nome_fantasia}</b>
+            </div>
+          ) : null}
         </div>
 
         {!isLoadingCertStatus && !hasActiveCert && selectedCompanyId && (
@@ -101,11 +114,7 @@ const NFeManager = () => {
               <div className="space-y-1">
                 <div className="font-medium text-yellow-900">Ação Necessária</div>
                 <div className="text-sm text-yellow-900">
-                  A empresa selecionada não possui um certificado digital ativo.
-                </div>
-                <div className="text-sm text-yellow-900">
-                  Para sincronizar documentos, é necessário configurar um certificado digital A1 para o ambiente de
-                  produção ou homologação.
+                  A empresa selecionada não possui certificado digital ativo.
                 </div>
                 <div className="pt-2">
                   <Button onClick={handleGoToConfig} size="sm" variant="outline">
@@ -125,7 +134,7 @@ const NFeManager = () => {
 
           <TabsContent value="recebidas" className="mt-4">
             <NFeRecebidas
-              companyId={selectedCompanyId}
+              companyId={selectedCompanyId}  // ✅ cnpjDigits
               isEnabled={hasActiveCert}
               isActive={activeTab === "recebidas"}
             />

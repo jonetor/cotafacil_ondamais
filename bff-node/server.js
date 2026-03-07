@@ -18,6 +18,11 @@ import { initQuotesDb } from "./quotesDb.js";
 import fiscalRoutes from "./api/fiscal.js";
 import fiscalImportRoutes from "./api/fiscalImport.js";
 
+//import fiscalSyncRoutes from "./api/fiscalSync.js";
+import companiesRoutes from "./api/companies.js";
+import commissionRoutes from "./api/commission.js";
+import salesRoutes from "./api/sales.js";
+
 
 
 
@@ -29,6 +34,10 @@ const app = express();
 
 app.use("/api", fiscalRoutes);
 app.use("/api", fiscalImportRoutes);
+//app.use("/api", fiscalSyncRoutes);
+app.use("/api/companies", companiesRoutes);
+app.use("/api", commissionRoutes);
+app.use("/api", salesRoutes);
 
 
 app.use(

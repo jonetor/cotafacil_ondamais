@@ -19,7 +19,7 @@ import { uid } from "@/lib/utils";
 
 const onlyDigits = (s) => String(s || "").replace(/\D/g, "");
 
-// ✅ TROQUE AQUI pelos 3 cadastros reais
+// ✅ suas 3 empresas (adicione ie/endereco/cep/site/email/fone se quiser cabeçalho completo no PDF)
 const COMPANY_OPTIONS = [
   {
     id: "static:14429925000167",
@@ -28,9 +28,15 @@ const COMPANY_OPTIONS = [
     nome_fantasia: "Fibra Onda Mais",
     cnpj: "14.429.925/0001-67",
     cnpjDigits: "14429925000167",
+    ie: "15350790-0",
+    endereco: "AV DAS NAÇÕES 2235 - CENTRO",
+    cep: "CEP 68390-000",
+    site: "www.ondamais.ai",
+    email: "contato@ondamais.ai",
+    fone: "0800 042 0900",
   },
   {
-    id: "static:46322439000131", // <-- troque
+    id: "static:46322439000131",
     name: "Onda Mais Tecnologia",
     razao_social: "Onda Mais Tecnologia LTDA",
     nome_fantasia: "Onda Mais Tecnologia",
@@ -38,7 +44,7 @@ const COMPANY_OPTIONS = [
     cnpjDigits: "46322439000131",
   },
   {
-    id: "static:44618753000130", // <-- troque
+    id: "static:44618753000130",
     name: "S & A Invest",
     razao_social: "S & A Invest LTDA",
     nome_fantasia: "S & A Invest",
@@ -124,7 +130,6 @@ function findCompanyById(id) {
 
 export default function QuoteFormPage() {
   const { clients, quotes, addQuote, users, user: supabaseUser, addresses, sellers: supabaseSellers } = useData();
-
   const { user: bffUser } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -139,29 +144,22 @@ export default function QuoteFormPage() {
 
   const [bffSellers, setBffSellers] = useState([]);
   const [loadingSellers, setLoadingSellers] = useState(false);
-
   const [externalClientOption, setExternalClientOption] = useState(null);
 
   const [currentQuote, setCurrentQuote] = useState({
     id: null,
-
     company_id: DEFAULT_COMPANY_ID,
     client_id: "",
     seller_id: "",
-
     items: [],
     status: "pending",
-
     validity_date: "",
     payment_terms: "",
     freight_type: "CIF",
     delivery_location: "",
-
-    description: "", // vira notes no payload
+    description: "",
     additional_info: "",
-
     contactPerson: "",
-
     proposal_number: "",
     revision: 0,
     created_at: new Date().toISOString(),
@@ -169,6 +167,35 @@ export default function QuoteFormPage() {
   });
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // ✅ PRINT HELPERS (CORRIGE openAndPrintUrl undefined)
+  const openAndPrintUrl = (url) => {
+    const w = window.open(url, "_blank");
+    if (!w) {
+      toast({
+        variant: "destructive",
+        title: "Pop-up bloqueado",
+        description: "Permita pop-ups para imprimir a cotação.",
+      });
+      return;
+    }
+    w.onload = () => {
+      try {
+        w.focus();
+        w.print();
+      } catch {}
+    };
+  };
+
+  const resultToUrl = (result) => {
+    // aceita: string, {url}, {blob}, Blob
+    if (!result) return null;
+    if (typeof result === "string") return result;
+    if (result?.url && typeof result.url === "string") return result.url;
+    const blob = result?.blob instanceof Blob ? result.blob : result instanceof Blob ? result : null;
+    if (blob) return URL.createObjectURL(blob);
+    return null;
+  };
 
   // LOAD SELLERS
   useEffect(() => {
@@ -203,21 +230,17 @@ export default function QuoteFormPage() {
           user_id: userId,
           items: normalizeItems(preload.items),
           company_id: String(preload.company_id || DEFAULT_COMPANY_ID),
-
           validity_date: safeText(preload.validity_date),
           payment_terms: safeText(preload.payment_terms),
           freight_type: safeText(preload.freight_type) || "CIF",
           delivery_location: safeText(preload.delivery_location),
-
           description: safeText(preload.description || preload.notes || ""),
           additional_info: safeText(preload.additional_info || preload.additionalInfo || ""),
-
           contactPerson: safeText(preload.contact_person || preload.contactPerson || prev.contactPerson),
         }));
         return;
       }
 
-      // fallback: pega da lista
       const quote = safeQuotes.find((q) => String(q?.id) === String(id));
       if (quote) {
         setCurrentQuote((prev) => ({
@@ -226,15 +249,12 @@ export default function QuoteFormPage() {
           user_id: userId,
           items: normalizeItems(quote.items),
           company_id: String(quote.company_id || DEFAULT_COMPANY_ID),
-
           validity_date: safeText(quote.validity_date),
           payment_terms: safeText(quote.payment_terms),
           freight_type: safeText(quote.freight_type) || "CIF",
           delivery_location: safeText(quote.delivery_location),
-
           description: safeText(quote.description || quote.notes || ""),
           additional_info: safeText(quote.additional_info || quote.additionalInfo || ""),
-
           contactPerson: safeText(quote.contact_person || quote.contactPerson || prev.contactPerson),
         }));
       }
@@ -274,8 +294,7 @@ export default function QuoteFormPage() {
     const nome = cli.nome_razao || cli.name || cli.nome || "";
 
     const matchInternal =
-      safeClients.find((c) => onlyDigits(c?.cpf_cnpj) === docDigits) ||
-      safeClients.find((c) => onlyDigits(c?.txId) === docDigits);
+      safeClients.find((c) => onlyDigits(c?.cpf_cnpj) === docDigits) || safeClients.find((c) => onlyDigits(c?.txId) === docDigits);
 
     if (matchInternal) {
       setExternalClientOption(null);
@@ -295,7 +314,6 @@ export default function QuoteFormPage() {
         city: cli.city,
         state: cli.state,
       };
-
       setExternalClientOption(tmp);
       setCurrentQuote((prev) => ({
         ...prev,
@@ -305,9 +323,7 @@ export default function QuoteFormPage() {
     }
 
     clearClienteFromStorage();
-    if (location.state?.cliente) {
-      navigate(location.pathname, { replace: true, state: {} });
-    }
+    if (location.state?.cliente) navigate(location.pathname, { replace: true, state: {} });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key, safeClients]);
 
@@ -320,8 +336,7 @@ export default function QuoteFormPage() {
 
     if (name === "client_id") {
       const selected =
-        safeClients.find((c) => String(c.id) === v) ||
-        (externalClientOption && String(externalClientOption.id) === v ? externalClientOption : null);
+        safeClients.find((c) => String(c.id) === v) || (externalClientOption && String(externalClientOption.id) === v ? externalClientOption : null);
 
       if (selected) {
         try {
@@ -330,9 +345,7 @@ export default function QuoteFormPage() {
         setCurrentQuote((prev) => ({
           ...prev,
           client_id: v,
-          contactPerson: prev.contactPerson?.trim()
-            ? prev.contactPerson
-            : String(selected.name || selected.nome_razao || ""),
+          contactPerson: prev.contactPerson?.trim() ? prev.contactPerson : String(selected.name || selected.nome_razao || ""),
         }));
       }
     }
@@ -358,10 +371,7 @@ export default function QuoteFormPage() {
     const subtotalProdutos = productItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
     const subtotalServicos = serviceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
     const subtotalScm = scmServiceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
-    const totalTributos = items.reduce((acc, item) => {
-      const taxes = item.taxes || {};
-      return acc + n(taxes.total_tributos_item || 0);
-    }, 0);
+    const totalTributos = items.reduce((acc, item) => acc + n(item?.taxes?.total_tributos_item || 0), 0);
     const totalGeral = subtotalProdutos + subtotalServicos + subtotalScm;
     return { subtotalProdutos, subtotalServicos, subtotalScm, totalTributos, totalGeral };
   }, [productItems, serviceItems, scmServiceItems, currentQuote.items]);
@@ -394,18 +404,11 @@ export default function QuoteFormPage() {
         subtotal_produtos: totais.subtotalProdutos,
         subtotal_servicos: totais.subtotalServicos,
         subtotal_scm: totais.subtotalScm,
-        // ✅ garante descrição/infos no PDF
         description: safeText(currentQuote.description),
         additional_info: safeText(currentQuote.additional_info),
-        notes: safeText(currentQuote.description), // compat com gerador
+        notes: safeText(currentQuote.description), // compat
       },
-      company: {
-        id: selectedCompany.id,
-        name: selectedCompany.name,
-        razao_social: selectedCompany.razao_social,
-        nome_fantasia: selectedCompany.nome_fantasia,
-        cnpj: selectedCompany.cnpj,
-      },
+      company: { ...selectedCompany }, // ✅ inclui ie/endereco/cep/site/email/fone se tiver
       client: client ? { ...client, addresses: safeAddresses.filter((addr) => addr.client_id === client.id) } : null,
       vendedor,
       autor,
@@ -420,17 +423,21 @@ export default function QuoteFormPage() {
     setIsPreviewOpen(true);
   };
 
+  // ✅ agora imprime corretamente (sem depender de variável externa)
   const handlePdfConfirm = async (template, meta) => {
     const action = meta?.action || "download";
     try {
       if (action === "print") {
         const result = await generateQuotePDF({ ...pdfPreviewData, template }, { download: false });
-        const url = typeof result === "string" ? result : result?.url ? result.url : result instanceof Blob ? URL.createObjectURL(result) : null;
+        const url = resultToUrl(result);
         if (url) {
           openAndPrintUrl(url);
           return;
         }
+        toast({ variant: "destructive", title: "Impressão", description: "PDF não retornou URL/Blob para impressão." });
+        return;
       }
+
       await generateQuotePDF({ ...pdfPreviewData, template });
     } catch (e) {
       toast({ variant: "destructive", title: "Erro ao gerar PDF", description: e?.message || String(e) });
@@ -467,14 +474,11 @@ export default function QuoteFormPage() {
 
     const quotePayload = {
       id: currentQuote.id || undefined,
-
       proposal_number: safeText(currentQuote.proposal_number),
       revision: Number(currentQuote.revision || 0),
       status: safeText(currentQuote.status || "pending"),
-
       created_at: currentQuote.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
-
       user_id: safeText(currentQuote.user_id || supabaseUser?.id || ""),
       seller_id: fixedSellerId,
 
@@ -487,16 +491,12 @@ export default function QuoteFormPage() {
       client_document: safeText(clientDoc),
 
       contact_person: safeText(currentQuote.contactPerson),
-
       validity_date: safeText(currentQuote.validity_date),
       payment_terms: safeText(currentQuote.payment_terms),
       freight_type: safeText(currentQuote.freight_type),
       delivery_location: safeText(currentQuote.delivery_location),
 
-      // ✅ descrição vai para notes (sem mexer no banco)
       notes: safeText(currentQuote.description),
-
-      // ✅ infos adicionais (se backend não salvar ainda, pelo menos vai pro PDF e pra edição via state)
       additional_info: safeText(currentQuote.additional_info),
 
       total_value: Number(totais.totalGeral || 0),
@@ -558,7 +558,6 @@ export default function QuoteFormPage() {
         </div>
 
         <div className="floating-card p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* ✅ EMPRESA (3 opções) */}
           <div>
             <Label htmlFor="company_id">Empresa Emitente</Label>
             <Select value={String(currentQuote.company_id || "")} onValueChange={handleSelectCompany}>
@@ -576,7 +575,6 @@ export default function QuoteFormPage() {
             </Select>
           </div>
 
-          {/* CLIENTE */}
           <div>
             <Label htmlFor="client_id">Cliente</Label>
             <div className="flex items-center gap-2">
@@ -602,7 +600,6 @@ export default function QuoteFormPage() {
             </div>
           </div>
 
-          {/* VENDEDOR */}
           <div>
             <Label htmlFor="seller_id">Vendedor</Label>
             <Select value={String(currentQuote.seller_id || "")} onValueChange={(v) => handleSelectChange("seller_id", v)}>
