@@ -5,15 +5,52 @@ import { db } from "../db.js";
 const router = express.Router();
 
 /* ===============================
-   CRIA TABELAS BASE (sem proposal_number ainda, para evitar erro em banco antigo)
+   MIGRAÇÃO DEFENSIVA
+================================ */
+
+function getColumns(table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all();
+}
+
+function ensureColumn(table, columnName, sqlDef) {
+  const cols = getColumns(table);
+  const exists = cols.some((c) => c.name === columnName);
+  if (!exists) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${sqlDef}`);
+  }
+}
+
+/* ===============================
+   CRIA TABELAS SE NÃO EXISTIREM
 ================================ */
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS quotes (
   id TEXT PRIMARY KEY,
+  proposal_number TEXT,
+  revision INTEGER DEFAULT 0,
+
+  user_id TEXT,
+  seller_id TEXT,
+
+  company_id TEXT,
+  company_name TEXT,
+  company_document TEXT,
+
   client_id TEXT,
   client_name TEXT,
+  client_document TEXT,
+
+  contact_person TEXT,
+
   status TEXT DEFAULT 'pending',
+
+  validity_date TEXT,
+  payment_terms TEXT,
+  freight_type TEXT,
+  delivery_location TEXT,
+  notes TEXT,
+  additional_info TEXT,
 
   subtotal REAL DEFAULT 0,
   tax_total REAL DEFAULT 0,
@@ -28,6 +65,7 @@ CREATE TABLE IF NOT EXISTS quote_items (
   id TEXT PRIMARY KEY,
   quote_id TEXT,
   product_id TEXT,
+  item_type TEXT,
   code TEXT,
   description TEXT,
   unit TEXT,
@@ -43,38 +81,33 @@ ON quote_items(quote_id);
 `);
 
 /* ===============================
-   MIGRAÇÃO DEFENSIVA: proposal_number
-   (depois que a tabela existe)
+   GARANTE COLUNAS EM BANCOS ANTIGOS
 ================================ */
 
-function hasColumn(table, col) {
-  const cols = db.prepare(`PRAGMA table_info('${table}')`).all();
-  return cols.some((c) => c.name === col);
-}
+ensureColumn("quotes", "proposal_number", "proposal_number TEXT");
+ensureColumn("quotes", "revision", "revision INTEGER DEFAULT 0");
+ensureColumn("quotes", "user_id", "user_id TEXT");
+ensureColumn("quotes", "seller_id", "seller_id TEXT");
+ensureColumn("quotes", "company_id", "company_id TEXT");
+ensureColumn("quotes", "company_name", "company_name TEXT");
+ensureColumn("quotes", "company_document", "company_document TEXT");
+ensureColumn("quotes", "client_id", "client_id TEXT");
+ensureColumn("quotes", "client_name", "client_name TEXT");
+ensureColumn("quotes", "client_document", "client_document TEXT");
+ensureColumn("quotes", "contact_person", "contact_person TEXT");
+ensureColumn("quotes", "validity_date", "validity_date TEXT");
+ensureColumn("quotes", "payment_terms", "payment_terms TEXT");
+ensureColumn("quotes", "freight_type", "freight_type TEXT");
+ensureColumn("quotes", "delivery_location", "delivery_location TEXT");
+ensureColumn("quotes", "notes", "notes TEXT");
+ensureColumn("quotes", "additional_info", "additional_info TEXT");
 
-// ✅ adiciona proposal_number se faltar
-if (!hasColumn("quotes", "proposal_number")) {
-  db.exec(`ALTER TABLE quotes ADD COLUMN proposal_number TEXT`);
-}
-
-// ✅ índice só depois da coluna existir
-db.exec(`CREATE INDEX IF NOT EXISTS idx_quotes_proposal_number ON quotes(proposal_number)`);
-
-/* ===============================
-   GERA PRÓXIMO NÚMERO DE PROPOSTA
-================================ */
-
-function nextProposalNumber() {
-  const row = db
-    .prepare(`SELECT MAX(CAST(proposal_number AS INTEGER)) AS maxNum FROM quotes`)
-    .get();
-
-  const next = Number(row?.maxNum || 0) + 1;
-  return String(next).padStart(5, "0");
-}
+ensureColumn("quote_items", "item_type", "item_type TEXT");
+ensureColumn("quote_items", "icms", "icms REAL DEFAULT 0");
+ensureColumn("quote_items", "issqn", "issqn REAL DEFAULT 0");
 
 /* ===============================
-   CALCULAR TOTAIS (payload)
+   CALCULAR TOTAIS
 ================================ */
 
 function calcTotalsFromPayload(items = []) {
@@ -84,8 +117,8 @@ function calcTotalsFromPayload(items = []) {
   for (const item of items) {
     const qty = Number(item.quantity || 0);
     const price = Number(item.unit_price || 0);
+    const total = Number(item.total_price ?? qty * price);
 
-    const total = qty * price;
     subtotal += total;
 
     const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
@@ -102,45 +135,6 @@ function calcTotalsFromPayload(items = []) {
 }
 
 /* ===============================
-   CALCULAR TOTAIS (banco)
-================================ */
-
-function calcTotalsFromDb(quoteId) {
-  const items = db
-    .prepare(
-      `
-      SELECT quantity, unit_price, icms, issqn
-      FROM quote_items
-      WHERE quote_id = ?
-    `
-    )
-    .all(quoteId);
-
-  let subtotal = 0;
-  let tax = 0;
-
-  for (const item of items) {
-    const qty = Number(item.quantity || 0);
-    const price = Number(item.unit_price || 0);
-
-    const total = qty * price;
-    subtotal += total;
-
-    const icms = Number(item.icms || 0);
-    const issqn = Number(item.issqn || 0);
-
-    tax += total * ((icms + issqn) / 100);
-  }
-
-  return {
-    subtotal,
-    tax_total: tax,
-    total_value: subtotal + tax,
-    itemsCount: items.length,
-  };
-}
-
-/* ===============================
    LISTAR COTAÇÕES
 ================================ */
 
@@ -151,7 +145,7 @@ router.get("/", (req, res) => {
       SELECT *
       FROM quotes
       ORDER BY created_at DESC
-    `
+      `
     )
     .all();
 
@@ -159,7 +153,7 @@ router.get("/", (req, res) => {
 });
 
 /* ===============================
-   BUSCAR UMA COTAÇÃO (com itens)
+   BUSCAR UMA COTAÇÃO
 ================================ */
 
 router.get("/:id", (req, res) => {
@@ -171,7 +165,7 @@ router.get("/:id", (req, res) => {
       SELECT *
       FROM quotes
       WHERE id = ?
-    `
+      `
     )
     .get(id);
 
@@ -185,8 +179,7 @@ router.get("/:id", (req, res) => {
       SELECT *
       FROM quote_items
       WHERE quote_id = ?
-      ORDER BY rowid ASC
-    `
+      `
     )
     .all(id);
 
@@ -196,7 +189,7 @@ router.get("/:id", (req, res) => {
 });
 
 /* ===============================
-   CRIAR COTAÇÃO (gera proposal_number)
+   CRIAR COTAÇÃO
 ================================ */
 
 router.post("/", (req, res) => {
@@ -207,33 +200,57 @@ router.post("/", (req, res) => {
   const items = Array.isArray(data.items) ? data.items : [];
   const totals = calcTotalsFromPayload(items);
 
-  const proposal_number = data.proposal_number
-    ? String(data.proposal_number).padStart(5, "0")
-    : nextProposalNumber();
-
   const trx = db.transaction(() => {
     db.prepare(
       `
       INSERT INTO quotes (
         id,
         proposal_number,
+        revision,
+        user_id,
+        seller_id,
+        company_id,
+        company_name,
+        company_document,
         client_id,
         client_name,
+        client_document,
+        contact_person,
         status,
+        validity_date,
+        payment_terms,
+        freight_type,
+        delivery_location,
+        notes,
+        additional_info,
         subtotal,
         tax_total,
         total_value,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
     ).run(
       id,
-      proposal_number,
+      data.proposal_number || "",
+      Number(data.revision || 0),
+      data.user_id || null,
+      data.seller_id || null,
+      data.company_id || null,
+      data.company_name || "",
+      data.company_document || "",
       data.client_id || null,
       data.client_name || "",
+      data.client_document || "",
+      data.contact_person || "",
       data.status || "pending",
+      data.validity_date || "",
+      data.payment_terms || "",
+      data.freight_type || "",
+      data.delivery_location || "",
+      data.notes || "",
+      data.additional_info || "",
       totals.subtotal,
       totals.tax_total,
       totals.total_value,
@@ -247,6 +264,7 @@ router.post("/", (req, res) => {
         id,
         quote_id,
         product_id,
+        item_type,
         code,
         description,
         unit,
@@ -256,13 +274,14 @@ router.post("/", (req, res) => {
         icms,
         issqn
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
     );
 
     for (const item of items) {
       const qty = Number(item.quantity || 0);
       const price = Number(item.unit_price || 0);
+      const total = Number(item.total_price ?? qty * price);
 
       const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
       const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
@@ -271,21 +290,25 @@ router.post("/", (req, res) => {
         crypto.randomUUID(),
         id,
         item.product_id || item.id || null,
+        item.item_type || "PRODUTO",
         item.code || "",
         item.description || "",
         item.unit || "un",
         qty,
         price,
-        qty * price,
+        total,
         icms,
         issqn
       );
     }
   });
 
-  trx();
-
-  res.json({ ok: true, id, proposal_number });
+  try {
+    trx();
+    res.json({ ok: true, id });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
 });
 
 /* ===============================
@@ -301,38 +324,72 @@ router.put("/:id", (req, res) => {
   const totals = calcTotalsFromPayload(items);
 
   const trx = db.transaction(() => {
-    const current = db.prepare(`SELECT proposal_number FROM quotes WHERE id=?`).get(id);
-    if (!current) throw new Error("Cotação não encontrada");
+    const result = db
+      .prepare(
+        `
+        UPDATE quotes
+        SET
+          proposal_number = ?,
+          revision = ?,
+          user_id = ?,
+          seller_id = ?,
+          company_id = ?,
+          company_name = ?,
+          company_document = ?,
+          client_id = ?,
+          client_name = ?,
+          client_document = ?,
+          contact_person = ?,
+          status = ?,
+          validity_date = ?,
+          payment_terms = ?,
+          freight_type = ?,
+          delivery_location = ?,
+          notes = ?,
+          additional_info = ?,
+          subtotal = ?,
+          tax_total = ?,
+          total_value = ?,
+          updated_at = ?
+        WHERE id = ?
+        `
+      )
+      .run(
+        data.proposal_number || "",
+        Number(data.revision || 0),
+        data.user_id || null,
+        data.seller_id || null,
+        data.company_id || null,
+        data.company_name || "",
+        data.company_document || "",
+        data.client_id || null,
+        data.client_name || "",
+        data.client_document || "",
+        data.contact_person || "",
+        data.status || "pending",
+        data.validity_date || "",
+        data.payment_terms || "",
+        data.freight_type || "",
+        data.delivery_location || "",
+        data.notes || "",
+        data.additional_info || "",
+        totals.subtotal,
+        totals.tax_total,
+        totals.total_value,
+        now,
+        id
+      );
 
-    const proposal_number = data.proposal_number
-      ? String(data.proposal_number).padStart(5, "0")
-      : (current.proposal_number || null);
+    if (result.changes === 0) {
+      throw new Error("Cotação não encontrada");
+    }
 
     db.prepare(
       `
-      UPDATE quotes
-      SET
-        proposal_number = ?,
-        client_id = ?,
-        client_name = ?,
-        subtotal = ?,
-        tax_total = ?,
-        total_value = ?,
-        updated_at = ?
-      WHERE id = ?
-    `
-    ).run(
-      proposal_number,
-      data.client_id || null,
-      data.client_name || "",
-      totals.subtotal,
-      totals.tax_total,
-      totals.total_value,
-      now,
-      id
-    );
-
-    db.prepare(`DELETE FROM quote_items WHERE quote_id = ?`).run(id);
+      DELETE FROM quote_items
+      WHERE quote_id = ?
+      `
+    ).run(id);
 
     const insertItem = db.prepare(
       `
@@ -340,6 +397,7 @@ router.put("/:id", (req, res) => {
         id,
         quote_id,
         product_id,
+        item_type,
         code,
         description,
         unit,
@@ -349,13 +407,14 @@ router.put("/:id", (req, res) => {
         icms,
         issqn
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
     );
 
     for (const item of items) {
       const qty = Number(item.quantity || 0);
       const price = Number(item.unit_price || 0);
+      const total = Number(item.total_price ?? qty * price);
 
       const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
       const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
@@ -364,12 +423,13 @@ router.put("/:id", (req, res) => {
         crypto.randomUUID(),
         id,
         item.product_id || item.id || null,
+        item.item_type || "PRODUTO",
         item.code || "",
         item.description || "",
         item.unit || "un",
         qty,
         price,
-        qty * price,
+        total,
         icms,
         issqn
       );
@@ -378,53 +438,33 @@ router.put("/:id", (req, res) => {
 
   try {
     trx();
-    res.json({ ok: true });
+    res.json({ ok: true, id });
   } catch (e) {
     res.status(404).json({ error: e?.message || String(e) });
   }
 });
 
 /* ===============================
-   APROVAR COTAÇÃO (não zera)
+   APROVAR COTAÇÃO
 ================================ */
 
 router.post("/:id/approve", (req, res) => {
   const id = req.params.id;
   const now = Date.now();
 
-  const trx = db.transaction(() => {
-    const totals = calcTotalsFromDb(id);
+  const result = db.prepare(
+    `
+    UPDATE quotes
+    SET status = 'approved', updated_at = ?
+    WHERE id = ?
+    `
+  ).run(now, id);
 
-    if (totals.itemsCount === 0) {
-      throw new Error("Cotação não possui itens para aprovar");
-    }
-
-    const result = db
-      .prepare(
-        `
-        UPDATE quotes
-        SET
-          status = 'approved',
-          subtotal = ?,
-          tax_total = ?,
-          total_value = ?,
-          updated_at = ?
-        WHERE id = ?
-      `
-      )
-      .run(totals.subtotal, totals.tax_total, totals.total_value, now, id);
-
-    if (result.changes === 0) {
-      throw new Error("Cotação não encontrada");
-    }
-  });
-
-  try {
-    trx();
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ error: e?.message || String(e) });
+  if (result.changes === 0) {
+    return res.status(404).json({ error: "Cotação não encontrada" });
   }
+
+  res.json({ ok: true });
 });
 
 /* ===============================
@@ -439,9 +479,12 @@ router.delete("/:id", (req, res) => {
     db.prepare(`DELETE FROM quotes WHERE id = ?`).run(id);
   });
 
-  trx();
-
-  res.json({ ok: true });
+  try {
+    trx();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
 });
 
 export default router;

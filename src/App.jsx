@@ -1,4 +1,3 @@
-// src/App.jsx
 import React from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Helmet } from "react-helmet";
@@ -32,7 +31,7 @@ import OrcamentoItens from "@/pages/OrcamentoItens";
 import CreateSellerPage from "@/pages/CreateSellerPage";
 import ProfilePage from "@/pages/ProfilePage";
 
-// ✅ página do orçamento
+// página do orçamento
 import NovoOrcamento from "@/pages/NovoOrcamento";
 
 /**
@@ -75,6 +74,28 @@ function PublicRoute({ children }) {
   return user ? <Navigate to="/dashboard" replace /> : children;
 }
 
+/**
+ * Rota exclusiva de admin
+ */
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth();
+
+  if (loading) return <FullscreenLoader />;
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const role = String(user?.role || user?.user_metadata?.role || "").toLowerCase();
+  const isAdmin = role === "admin" || user?.email === "admin@ondamais.ai";
+
+  if (!isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -115,15 +136,10 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        {/* ao entrar em "/" manda pro dashboard */}
         <Route index element={<Navigate to="dashboard" replace />} />
 
-        {/* ✅ Rotas internas RELATIVAS */}
+        {/* ===== Comuns ===== */}
         <Route path="dashboard" element={<DashboardPage />} />
-
-        <Route path="empresas" element={<Companies />} />
-        <Route path="empresas/:id" element={<CompanyDetailPage />} />
-        <Route path="empresas/:id/:tab" element={<CompanyDetailPage />} />
 
         <Route path="clientes" element={<Clients />} />
         <Route path="clientes/novo" element={<ClientFormPage />} />
@@ -138,23 +154,115 @@ function AppRoutes() {
         <Route path="orcamentos/novo" element={<NovoOrcamento />} />
         <Route path="orcamentos/itens" element={<OrcamentoItens />} />
 
-        <Route path="vendedores" element={<Sellers />} />
-        <Route path="usuarios" element={<Users />} />
-        <Route path="auditoria" element={<AuditLog />} />
-        <Route path="configuracoes" element={<Settings />} />
-        <Route path="api-integration" element={<ApiIntegrationPage />} />
-
-        <Route path="fiscal" element={<FiscalPage />} />
-        <Route path="fiscal/calculo" element={<CalculoFiscalPage />} />
-        <Route path="fiscal/nfe" element={<NFePage />} />
-
-        <Route path="usuarios/novo-vendedor" element={<CreateSellerPage />} />
-
-        {/* ✅ ROTA RELATIVA (removi a barra inicial) */}
         <Route path="perfil" element={<ProfilePage />} />
+
+        {/* ===== Somente Admin ===== */}
+        <Route
+          path="empresas"
+          element={
+            <AdminRoute>
+              <Companies />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="empresas/:id"
+          element={
+            <AdminRoute>
+              <CompanyDetailPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="empresas/:id/:tab"
+          element={
+            <AdminRoute>
+              <CompanyDetailPage />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="vendedores"
+          element={
+            <AdminRoute>
+              <Sellers />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="usuarios"
+          element={
+            <AdminRoute>
+              <Users />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="auditoria"
+          element={
+            <AdminRoute>
+              <AuditLog />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="configuracoes"
+          element={
+            <AdminRoute>
+              <Settings />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="api-integration"
+          element={
+            <AdminRoute>
+              <ApiIntegrationPage />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="fiscal"
+          element={
+            <AdminRoute>
+              <FiscalPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="fiscal/calculo"
+          element={
+            <AdminRoute>
+              <CalculoFiscalPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="fiscal/nfe"
+          element={
+            <AdminRoute>
+              <NFePage />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="usuarios/novo-vendedor"
+          element={
+            <AdminRoute>
+              <CreateSellerPage />
+            </AdminRoute>
+          }
+        />
       </Route>
 
-      {/* ===== Fallback: qualquer rota desconhecida ===== */}
+      {/* ===== Fallback ===== */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -177,7 +285,6 @@ export default function App() {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       </Helmet>
 
-      {/* ✅ sem Router aqui (Router fica SOMENTE no main.jsx) */}
       <AppRoutes />
       <Toaster />
     </>

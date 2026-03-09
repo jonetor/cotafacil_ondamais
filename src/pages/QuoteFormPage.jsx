@@ -19,7 +19,6 @@ import { uid } from "@/lib/utils";
 
 const onlyDigits = (s) => String(s || "").replace(/\D/g, "");
 
-// ✅ suas 3 empresas (adicione ie/endereco/cep/site/email/fone se quiser cabeçalho completo no PDF)
 const COMPANY_OPTIONS = [
   {
     id: "static:14429925000167",
@@ -129,7 +128,16 @@ function findCompanyById(id) {
 }
 
 export default function QuoteFormPage() {
-  const { clients, quotes, addQuote, users, user: supabaseUser, addresses, sellers: supabaseSellers } = useData();
+  const {
+    clients,
+    quotes,
+    addQuote,
+    updateQuote,
+    users,
+    addresses,
+    sellers: supabaseSellers,
+  } = useData();
+
   const { user: bffUser } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -145,6 +153,11 @@ export default function QuoteFormPage() {
   const [bffSellers, setBffSellers] = useState([]);
   const [loadingSellers, setLoadingSellers] = useState(false);
   const [externalClientOption, setExternalClientOption] = useState(null);
+
+  // ✅ usa id OU sub
+  const loggedUserId = String(bffUser?.id || bffUser?.sub || "").trim();
+  const loggedUserRole = String(bffUser?.role || bffUser?.user_metadata?.role || "").toLowerCase();
+  const isSeller = loggedUserRole === "seller";
 
   const [currentQuote, setCurrentQuote] = useState({
     id: null,
@@ -168,7 +181,6 @@ export default function QuoteFormPage() {
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  // ✅ PRINT HELPERS (CORRIGE openAndPrintUrl undefined)
   const openAndPrintUrl = (url) => {
     const w = window.open(url, "_blank");
     if (!w) {
@@ -188,7 +200,6 @@ export default function QuoteFormPage() {
   };
 
   const resultToUrl = (result) => {
-    // aceita: string, {url}, {blob}, Blob
     if (!result) return null;
     if (typeof result === "string") return result;
     if (result?.url && typeof result.url === "string") return result.url;
@@ -197,7 +208,6 @@ export default function QuoteFormPage() {
     return null;
   };
 
-  // LOAD SELLERS
   useEffect(() => {
     (async () => {
       try {
@@ -212,13 +222,9 @@ export default function QuoteFormPage() {
         setLoadingSellers(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [toast]);
 
-  // INIT QUOTE (edit preload)
   useEffect(() => {
-    const userId = supabaseUser?.id || "";
-
     async function loadEditQuote() {
       if (!id) return;
 
@@ -227,7 +233,8 @@ export default function QuoteFormPage() {
         setCurrentQuote((prev) => ({
           ...prev,
           ...preload,
-          user_id: userId,
+          user_id: safeText(preload.user_id || loggedUserId),
+          seller_id: safeText(preload.seller_id || loggedUserId),
           items: normalizeItems(preload.items),
           company_id: String(preload.company_id || DEFAULT_COMPANY_ID),
           validity_date: safeText(preload.validity_date),
@@ -246,7 +253,8 @@ export default function QuoteFormPage() {
         setCurrentQuote((prev) => ({
           ...prev,
           ...quote,
-          user_id: userId,
+          user_id: safeText(quote.user_id || loggedUserId),
+          seller_id: safeText(quote.seller_id || loggedUserId),
           items: normalizeItems(quote.items),
           company_id: String(quote.company_id || DEFAULT_COMPANY_ID),
           validity_date: safeText(quote.validity_date),
@@ -264,28 +272,30 @@ export default function QuoteFormPage() {
       setCurrentQuote((prev) => ({
         ...prev,
         proposal_number: String(getNextProposalNumber(safeQuotes)).padStart(5, "0"),
-        user_id: userId,
+        user_id: loggedUserId,
+        seller_id: prev.seller_id || loggedUserId,
         company_id: String(prev.company_id || DEFAULT_COMPANY_ID),
       }));
       return;
     }
 
     loadEditQuote();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, supabaseUser, location.state, safeQuotes]);
+  }, [id, location.state, safeQuotes, loggedUserId]);
 
-  // SELLER DEFAULT = LOGADO
+  // ✅ vendedor logado vira vendedor padrão sempre que estiver vazio
   useEffect(() => {
-    if (id) return;
-    if (!bffUser?.sub) return;
+    if (!loggedUserId) return;
 
     setCurrentQuote((prev) => {
       if (prev.seller_id) return prev;
-      return { ...prev, seller_id: String(bffUser.sub) };
+      return {
+        ...prev,
+        seller_id: loggedUserId,
+        user_id: prev.user_id || loggedUserId,
+      };
     });
-  }, [bffUser, id]);
+  }, [loggedUserId]);
 
-  // RECEBER CLIENTE
   useEffect(() => {
     const cli = location.state?.cliente || readClienteFromStorage();
     if (!cli) return;
@@ -294,7 +304,8 @@ export default function QuoteFormPage() {
     const nome = cli.nome_razao || cli.name || cli.nome || "";
 
     const matchInternal =
-      safeClients.find((c) => onlyDigits(c?.cpf_cnpj) === docDigits) || safeClients.find((c) => onlyDigits(c?.txId) === docDigits);
+      safeClients.find((c) => onlyDigits(c?.cpf_cnpj) === docDigits) ||
+      safeClients.find((c) => onlyDigits(c?.txId) === docDigits);
 
     if (matchInternal) {
       setExternalClientOption(null);
@@ -324,11 +335,13 @@ export default function QuoteFormPage() {
 
     clearClienteFromStorage();
     if (location.state?.cliente) navigate(location.pathname, { replace: true, state: {} });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.key, safeClients]);
+  }, [location.key, safeClients, navigate, location.pathname, location.state]);
 
-  const handleItemsChange = (newItems) => setCurrentQuote((prev) => ({ ...prev, items: normalizeItems(newItems) }));
-  const handleInputChange = (e) => setCurrentQuote((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleItemsChange = (newItems) =>
+    setCurrentQuote((prev) => ({ ...prev, items: normalizeItems(newItems) }));
+
+  const handleInputChange = (e) =>
+    setCurrentQuote((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleSelectChange = (name, value) => {
     const v = String(value);
@@ -336,7 +349,8 @@ export default function QuoteFormPage() {
 
     if (name === "client_id") {
       const selected =
-        safeClients.find((c) => String(c.id) === v) || (externalClientOption && String(externalClientOption.id) === v ? externalClientOption : null);
+        safeClients.find((c) => String(c.id) === v) ||
+        (externalClientOption && String(externalClientOption.id) === v ? externalClientOption : null);
 
       if (selected) {
         try {
@@ -345,7 +359,9 @@ export default function QuoteFormPage() {
         setCurrentQuote((prev) => ({
           ...prev,
           client_id: v,
-          contactPerson: prev.contactPerson?.trim() ? prev.contactPerson : String(selected.name || selected.nome_razao || ""),
+          contactPerson: prev.contactPerson?.trim()
+            ? prev.contactPerson
+            : String(selected.name || selected.nome_razao || ""),
         }));
       }
     }
@@ -362,9 +378,18 @@ export default function QuoteFormPage() {
     navigate(`/clientes?returnTo=${encodeURIComponent(returnTo)}`);
   };
 
-  const productItems = useMemo(() => (currentQuote.items || []).filter((i) => i.item_type === "PRODUTO"), [currentQuote.items]);
-  const serviceItems = useMemo(() => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO"), [currentQuote.items]);
-  const scmServiceItems = useMemo(() => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO_SCM"), [currentQuote.items]);
+  const productItems = useMemo(
+    () => (currentQuote.items || []).filter((i) => i.item_type === "PRODUTO"),
+    [currentQuote.items]
+  );
+  const serviceItems = useMemo(
+    () => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO"),
+    [currentQuote.items]
+  );
+  const scmServiceItems = useMemo(
+    () => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO_SCM"),
+    [currentQuote.items]
+  );
 
   const totais = useMemo(() => {
     const items = Array.isArray(currentQuote.items) ? currentQuote.items : [];
@@ -378,7 +403,9 @@ export default function QuoteFormPage() {
 
   const clientsSelectList = useMemo(() => {
     const list = [...safeClients];
-    if (externalClientOption && !list.some((c) => String(c.id) === String(externalClientOption.id))) list.unshift(externalClientOption);
+    if (externalClientOption && !list.some((c) => String(c.id) === String(externalClientOption.id))) {
+      list.unshift(externalClientOption);
+    }
     return list;
   }, [safeClients, externalClientOption]);
 
@@ -387,10 +414,17 @@ export default function QuoteFormPage() {
     return safeSupabaseSellers;
   }, [bffSellers, safeSupabaseSellers]);
 
-  const selectedCompany = useMemo(() => findCompanyById(currentQuote.company_id) || DEFAULT_COMPANY, [currentQuote.company_id]);
+  const selectedCompany = useMemo(
+    () => findCompanyById(currentQuote.company_id) || DEFAULT_COMPANY,
+    [currentQuote.company_id]
+  );
 
   const pdfPreviewData = useMemo(() => {
-    const client = safeClients.find((c) => String(c.id) === String(currentQuote.client_id)) || externalClientOption || null;
+    const client =
+      safeClients.find((c) => String(c.id) === String(currentQuote.client_id)) ||
+      externalClientOption ||
+      null;
+
     const autor = safeUsers.find((u) => String(u.id) === String(currentQuote.user_id));
     const vendedor =
       (bffSellers || []).find((u) => String(u.id) === String(currentQuote.seller_id)) ||
@@ -406,24 +440,39 @@ export default function QuoteFormPage() {
         subtotal_scm: totais.subtotalScm,
         description: safeText(currentQuote.description),
         additional_info: safeText(currentQuote.additional_info),
-        notes: safeText(currentQuote.description), // compat
+        notes: safeText(currentQuote.description),
       },
-      company: { ...selectedCompany }, // ✅ inclui ie/endereco/cep/site/email/fone se tiver
-      client: client ? { ...client, addresses: safeAddresses.filter((addr) => addr.client_id === client.id) } : null,
+      company: { ...selectedCompany },
+      client: client
+        ? { ...client, addresses: safeAddresses.filter((addr) => addr.client_id === client.id) }
+        : null,
       vendedor,
       autor,
     };
-  }, [currentQuote, totais, selectedCompany, safeClients, externalClientOption, safeAddresses, safeUsers, bffSellers, safeSupabaseSellers]);
+  }, [
+    currentQuote,
+    totais,
+    selectedCompany,
+    safeClients,
+    externalClientOption,
+    safeAddresses,
+    safeUsers,
+    bffSellers,
+    safeSupabaseSellers,
+  ]);
 
   const handleOpenPreview = () => {
     if (!currentQuote.client_id) {
-      toast({ variant: "destructive", title: "Selecione um cliente", description: "Escolha um cliente antes de gerar o PDF." });
+      toast({
+        variant: "destructive",
+        title: "Selecione um cliente",
+        description: "Escolha um cliente antes de gerar o PDF.",
+      });
       return;
     }
     setIsPreviewOpen(true);
   };
 
-  // ✅ agora imprime corretamente (sem depender de variável externa)
   const handlePdfConfirm = async (template, meta) => {
     const action = meta?.action || "download";
     try {
@@ -434,29 +483,45 @@ export default function QuoteFormPage() {
           openAndPrintUrl(url);
           return;
         }
-        toast({ variant: "destructive", title: "Impressão", description: "PDF não retornou URL/Blob para impressão." });
+        toast({
+          variant: "destructive",
+          title: "Impressão",
+          description: "PDF não retornou URL/Blob para impressão.",
+        });
         return;
       }
 
       await generateQuotePDF({ ...pdfPreviewData, template });
     } catch (e) {
-      toast({ variant: "destructive", title: "Erro ao gerar PDF", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar PDF",
+        description: e?.message || String(e),
+      });
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // ✅ id OU sub
+    const fallbackLoggedId = String(bffUser?.id || bffUser?.sub || "").trim();
+
     const fixedCompanyId = String(currentQuote.company_id || DEFAULT_COMPANY_ID);
-    const fixedSellerId = String(currentQuote.seller_id || bffUser?.sub || "");
-    const fixedClientId = String(currentQuote.client_id || "");
+    const fixedSellerId = String(currentQuote.seller_id || fallbackLoggedId || "").trim();
+    const fixedClientId = String(currentQuote.client_id || "").trim();
 
     const missing = [];
-    if (!fixedCompanyId.trim()) missing.push("Empresa");
-    if (!fixedClientId.trim()) missing.push("Cliente");
-    if (!fixedSellerId.trim()) missing.push("Vendedor");
+    if (!fixedCompanyId) missing.push("Empresa");
+    if (!fixedClientId) missing.push("Cliente");
+    if (!fixedSellerId) missing.push("Vendedor");
+
     if (missing.length) {
-      toast({ variant: "destructive", title: "Campos obrigatórios", description: `Faltando: ${missing.join(", ")}.` });
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios",
+        description: `Faltando: ${missing.join(", ")}.`,
+      });
       return;
     }
 
@@ -477,9 +542,11 @@ export default function QuoteFormPage() {
       proposal_number: safeText(currentQuote.proposal_number),
       revision: Number(currentQuote.revision || 0),
       status: safeText(currentQuote.status || "pending"),
-      created_at: currentQuote.created_at || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      user_id: safeText(currentQuote.user_id || supabaseUser?.id || ""),
+      created_at: currentQuote.created_at || Date.now(),
+      updated_at: Date.now(),
+
+      // ✅ vínculo correto
+      user_id: safeText(currentQuote.user_id || fallbackLoggedId),
       seller_id: fixedSellerId,
 
       company_id: fixedCompanyId,
@@ -495,7 +562,6 @@ export default function QuoteFormPage() {
       payment_terms: safeText(currentQuote.payment_terms),
       freight_type: safeText(currentQuote.freight_type),
       delivery_location: safeText(currentQuote.delivery_location),
-
       notes: safeText(currentQuote.description),
       additional_info: safeText(currentQuote.additional_info),
 
@@ -517,13 +583,33 @@ export default function QuoteFormPage() {
       })),
     };
 
+    console.log("[QuoteFormPage] salvando quotePayload:", quotePayload);
+
     try {
-      const saved = await addQuote(quotePayload);
-      toast({ title: currentQuote.id ? "Cotação atualizada!" : "Cotação criada!", description: "A cotação foi salva com sucesso." });
-      if (saved?.id && !currentQuote.id) setCurrentQuote((prev) => ({ ...prev, id: saved.id }));
+      let saved;
+
+      if (currentQuote.id && typeof updateQuote === "function") {
+        saved = await updateQuote(currentQuote.id, quotePayload);
+      } else {
+        saved = await addQuote(quotePayload);
+      }
+
+      toast({
+        title: currentQuote.id ? "Cotação atualizada!" : "Cotação criada!",
+        description: "A cotação foi salva com sucesso.",
+      });
+
+      if (saved?.id && !currentQuote.id) {
+        setCurrentQuote((prev) => ({ ...prev, id: saved.id }));
+      }
+
       navigate("/cotacoes");
     } catch (error) {
-      toast({ variant: "destructive", title: "Erro ao Salvar", description: String(error?.message || error) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao Salvar",
+        description: String(error?.message || error),
+      });
     }
   };
 
@@ -531,7 +617,7 @@ export default function QuoteFormPage() {
   const canSave =
     Boolean(String(currentQuote.company_id || DEFAULT_COMPANY_ID).trim()) &&
     Boolean(String(currentQuote.client_id || "").trim()) &&
-    Boolean(String(currentQuote.seller_id || bffUser?.sub || "").trim());
+    Boolean(String(currentQuote.seller_id || loggedUserId || "").trim());
 
   return (
     <div className="space-y-6">
@@ -602,7 +688,11 @@ export default function QuoteFormPage() {
 
           <div>
             <Label htmlFor="seller_id">Vendedor</Label>
-            <Select value={String(currentQuote.seller_id || "")} onValueChange={(v) => handleSelectChange("seller_id", v)}>
+            <Select
+              value={String(currentQuote.seller_id || "")}
+              onValueChange={(v) => handleSelectChange("seller_id", v)}
+              disabled={isSeller}
+            >
               <SelectTrigger className="input-field">
                 <UserSquare className="w-4 h-4 mr-2 opacity-60" />
                 <SelectValue placeholder={loadingSellers ? "Carregando vendedores..." : "Selecione o vendedor"} />
@@ -620,7 +710,12 @@ export default function QuoteFormPage() {
 
           <div className="md:col-span-3">
             <Label htmlFor="contactPerson">Aos Cuidados de (Contato no Cliente)</Label>
-            <Input name="contactPerson" value={currentQuote.contactPerson} onChange={handleInputChange} className="input-field" />
+            <Input
+              name="contactPerson"
+              value={currentQuote.contactPerson}
+              onChange={handleInputChange}
+              className="input-field"
+            />
           </div>
         </div>
 

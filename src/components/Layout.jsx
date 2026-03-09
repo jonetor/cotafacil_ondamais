@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { AnimatePresence, motion } from "framer-motion";
 
-/* ✅ Admin links (Configurações removido; Auditoria só para admin) */
+/* ✅ links extras só de admin */
 const adminLinks = [{ to: "/auditoria", icon: History, text: "Auditoria" }];
 
 const NavItem = ({ to, icon: Icon, text, onClick }) => {
@@ -110,23 +110,24 @@ const UserMenu = () => {
 const SidebarContent = ({ onLinkClick }) => {
   const { user } = useAuth();
 
-  const isAdmin = user?.role === "admin" || user?.email === "admin@ondamais.ai";
+  const roleRaw = user?.role || user?.user_metadata?.role || "";
+  const isAdmin = roleRaw === "admin" || user?.email === "admin@ondamais.ai";
 
   const navLinks = useMemo(() => {
     const base = [
       { to: "/dashboard", icon: LayoutGrid, text: "Dashboard" },
-      { to: "/empresas", icon: Building, text: "Empresas" },
       { to: "/clientes", icon: Users2, text: "Clientes" },
       { to: "/produtos", icon: Package, text: "Produtos" },
       { to: "/cotacoes", icon: FileText, text: "Cotações" },
     ];
 
     if (isAdmin) {
-      base.push({ to: "/vendedores", icon: UserCircle, text: "Vendedores" });
+      base.push(
+        { to: "/empresas", icon: Building, text: "Empresas" },
+        { to: "/vendedores", icon: UserCircle, text: "Vendedores" },
+        { to: "/fiscal", icon: Calculator, text: "Fiscal" }
+      );
     }
-
-    // ✅ REMOVIDO: /usuarios
-    base.push({ to: "/fiscal", icon: Calculator, text: "Fiscal" });
 
     return base;
   }, [isAdmin]);
@@ -158,7 +159,6 @@ const SidebarContent = ({ onLinkClick }) => {
         )}
       </nav>
 
-      {/* ✅ UserMenu embaixo */}
       <div className="px-3 pb-3">
         <UserMenu />
       </div>
@@ -181,12 +181,10 @@ const Layout = () => {
 
   return (
     <div className="min-h-screen bg-app-background flex">
-      {/* Sidebar desktop */}
       <aside className="hidden md:block w-72 border-r border-white/10">
         <SidebarContent />
       </aside>
 
-      {/* Sidebar mobile */}
       <AnimatePresence>
         {isSidebarOpen && (
           <>
@@ -210,7 +208,6 @@ const Layout = () => {
         )}
       </AnimatePresence>
 
-      {/* Conteúdo */}
       <main className="flex-1 min-w-0">
         <div className="md:hidden p-3">
           <button
