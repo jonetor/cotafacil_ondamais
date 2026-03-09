@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
+import { exportDashboardToExcel, exportDashboardToPdf } from '@/lib/dashboardExport';
 
 const MetricCard = ({ icon: Icon, title, value, color, delay }) => (
   <motion.div
@@ -43,15 +44,17 @@ const MetricCard = ({ icon: Icon, title, value, color, delay }) => (
 );
 
 const DashboardPage = () => {
-  const { quotes, clients } = useData();
+  const { quotes, clients, sellers } = useData();
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   const [period, setPeriod] = useState('month');
+  const [sellerFilter, setSellerFilter] = useState('');
 
   const role = String(user?.role || user?.user_metadata?.role || '').toLowerCase();
   const isAdmin = role === 'admin';
+  const currentUserId = String(user?.id || user?.sub || '');
 
   const handleNotImplemented = (feature) => {
     toast({
@@ -60,11 +63,32 @@ const DashboardPage = () => {
     });
   };
 
+  const getClientName = (clientId, fallbackName) => {
+    if (fallbackName) return fallbackName;
+    const client = clients?.find(c => String(c.id) === String(clientId));
+    return client?.fantasia || client?.name || client?.nome_razao || 'Cliente não encontrado';
+  };
+
+  const getSellerName = (sellerId) => {
+    const seller = sellers?.find(s => String(s.id) === String(sellerId));
+    return seller?.name || seller?.nome || seller?.email || 'Sem vendedor';
+  };
+
+  const periodLabel = useMemo(() => {
+    const map = {
+      day: 'Dia',
+      week: 'Semana',
+      month: 'Mês',
+      year: 'Ano',
+    };
+    return map[period] || period;
+  }, [period]);
+
   const filteredQuotes = useMemo(() => {
     const now = new Date();
     if (!quotes) return [];
 
-    return quotes.filter((quote) => {
+    let list = quotes.filter((quote) => {
       const quoteDate = new Date(quote.created_at);
       if (Number.isNaN(quoteDate.getTime())) return false;
 
@@ -83,7 +107,17 @@ const DashboardPage = () => {
       }
       return true;
     });
-  }, [quotes, period]);
+
+    if (isAdmin) {
+      if (sellerFilter) {
+        list = list.filter((q) => String(q.seller_id || '') === String(sellerFilter));
+      }
+    } else {
+      list = list.filter((q) => String(q.seller_id || '') === currentUserId);
+    }
+
+    return list;
+  }, [quotes, period, isAdmin, sellerFilter, currentUserId]);
 
   const totalValue = filteredQuotes.reduce((sum, q) => sum + (Number(q.total_value) || 0), 0);
   const approvedQuotes = filteredQuotes.filter(q => String(q.status || '').toLowerCase() === 'approved');
@@ -93,6 +127,10 @@ const DashboardPage = () => {
   const recentQuotes = [...filteredQuotes]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 5);
+
+  const selectedSellerLabel = isAdmin
+    ? (sellerFilter ? getSellerName(sellerFilter) : 'Todos os vendedores')
+    : (user?.name || user?.user_metadata?.name || getSellerName(currentUserId));
 
   const getStatusInfo = (status) => {
     switch (String(status || '').toLowerCase()) {
@@ -104,12 +142,6 @@ const DashboardPage = () => {
       default:
         return { text: 'Pendente', color: 'text-yellow-400', bg: 'bg-yellow-500/10' };
     }
-  };
-
-  const getClientName = (clientId, fallbackName) => {
-    if (fallbackName) return fallbackName;
-    const client = clients?.find(c => String(c.id) === String(clientId));
-    return client?.fantasia || client?.name || client?.nome_razao || 'Cliente não encontrado';
   };
 
   const canEditQuote = (quote) => {
@@ -133,6 +165,52 @@ const DashboardPage = () => {
     });
   };
 
+  const handleExportExcel = () => {
+    try {
+      exportDashboardToExcel({
+        quotes: filteredQuotes,
+        sellers: sellers || [],
+        selectedSellerId: isAdmin ? sellerFilter : currentUserId,
+        periodLabel,
+        sellerLabel: selectedSellerLabel,
+        getClientName,
+        getSellerName,
+      });
+
+      toast({
+        title: 'Relatório exportado',
+        description: 'O arquivo Excel foi gerado com sucesso.',
+      });
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao exportar Excel',
+        description: e?.message || String(e),
+      });
+    }
+  };
+
+  const handleExportPdf = () => {
+    try {
+      exportDashboardToPdf({
+        quotes: filteredQuotes,
+        periodLabel,
+        sellerLabel: selectedSellerLabel,
+      });
+
+      toast({
+        title: 'Relatório exportado',
+        description: 'O PDF resumido foi gerado com sucesso.',
+      });
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao exportar PDF',
+        description: e?.message || String(e),
+      });
+    }
+  };
+
   return (
     <div className="text-slate-200 min-h-full -m-8 p-8">
       <Helmet>
@@ -141,27 +219,53 @@ const DashboardPage = () => {
 
       <div className="space-y-8">
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-100">Dashboard Comercial</h1>
-              <p className="text-slate-400 mt-1">Visão geral do desempenho de suas propostas.</p>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h1 className="text-3xl font-bold text-slate-100">Dashboard Comercial</h1>
+                <p className="text-slate-400 mt-1">Visão geral do desempenho de suas propostas.</p>
+              </div>
+
+              <div className="flex items-center gap-2 bg-slate-800/50 p-1 rounded-lg border border-slate-700">
+                {[{ key: 'day', label: 'Dia' }, { key: 'week', label: 'Semana' }, { key: 'month', label: 'Mês' }, { key: 'year', label: 'Ano' }].map(p => (
+                  <Button
+                    key={p.key}
+                    onClick={() => setPeriod(p.key)}
+                    variant="ghost"
+                    className={`capitalize transition-colors duration-300 rounded-md px-4 py-1 text-sm ${
+                      period === p.key
+                        ? 'bg-blue-600/30 text-blue-300'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+                    }`}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-800/50 p-1 rounded-lg border border-slate-700">
-              {[{ key: 'day', label: 'Dia' }, { key: 'week', label: 'Semana' }, { key: 'month', label: 'Mês' }, { key: 'year', label: 'Ano' }].map(p => (
-                <Button
-                  key={p.key}
-                  onClick={() => setPeriod(p.key)}
-                  variant="ghost"
-                  className={`capitalize transition-colors duration-300 rounded-md px-4 py-1 text-sm ${
-                    period === p.key
-                      ? 'bg-blue-600/30 text-blue-300'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
-                  }`}
-                >
-                  {p.label}
-                </Button>
-              ))}
+            <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+              <div className="text-sm text-slate-400">
+                Filtro atual: <span className="text-slate-200 font-medium">{periodLabel}</span> |{' '}
+                <span className="text-slate-200 font-medium">{selectedSellerLabel}</span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {isAdmin && (
+                  <select
+                    value={sellerFilter}
+                    onChange={(e) => setSellerFilter(e.target.value)}
+                    className="input-field min-w-[260px]"
+                  >
+                    <option value="">Todos os vendedores</option>
+                    {(sellers || []).map((seller) => (
+                      <option key={seller.id} value={seller.id}>
+                        {seller.name || seller.nome || seller.email}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </div>
           </div>
         </motion.div>
@@ -191,11 +295,11 @@ const DashboardPage = () => {
                 </DropdownMenuTrigger>
 
                 <DropdownMenuContent className="glass-effect border-slate-700 text-slate-200">
-                  <DropdownMenuItem onClick={() => handleNotImplemented('exportação para PDF')} className="cursor-pointer hover:!bg-slate-700">
-                    <FileText className="w-4 h-4 mr-2" /> PDF
+                  <DropdownMenuItem onClick={handleExportPdf} className="cursor-pointer hover:!bg-slate-700">
+                    <FileText className="w-4 h-4 mr-2" /> PDF Resumido
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleNotImplemented('exportação para Excel')} className="cursor-pointer hover:!bg-slate-700">
-                    <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
+                  <DropdownMenuItem onClick={handleExportExcel} className="cursor-pointer hover:!bg-slate-700">
+                    <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel Completo
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
