@@ -63,7 +63,7 @@ async function loadBrandImages() {
 }
 
 /* ============================================================
-   COMPANY HEADER LINE (dados para usar NO CORPO do orçamento)
+   COMPANY HEADER LINE
 ============================================================ */
 
 const COMPANY_FALLBACK = {
@@ -94,7 +94,7 @@ function buildCompanyDadosLine(company) {
 }
 
 /* ============================================================
-   BRAND DRAW (ondas + logo + slogan apenas)
+   BRAND DRAW
 ============================================================ */
 
 function drawBrand(doc, brand) {
@@ -159,11 +159,9 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
     };
   });
 
-  // ✅ DESCRIÇÃO (prioriza q.description; fallback para q.notes)
   const description = safeText(q.description || q.descricao || q.desc || "").trim();
   const notes = safeText(q.notes || "").trim();
-
-  // Se você está usando "notes" como descrição no front, isso garante que sempre imprime
+  const additional_info = safeText(q.additional_info || q.additionalInfo || "").trim();
   const finalDescription = description || notes;
 
   return {
@@ -173,16 +171,13 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
       revision: asNumber(q.revision || 0),
       createdAtStr: format(new Date(q.created_at || new Date()), "dd/MM/yyyy"),
       items: normItems,
-
       validity_date: safeText(q.validity_date || "").trim(),
       payment_terms: safeText(q.payment_terms || "").trim(),
       freight_type: safeText(q.freight_type || "").trim(),
       delivery_location: safeText(q.delivery_location || "").trim(),
-
-      // ✅ agora temos os 2
       description: finalDescription,
-      notes: notes,
-
+      notes,
+      additional_info,
       contactPerson: safeText(q.contactPerson || q.contact_person || "").trim(),
     },
     company: company || null,
@@ -202,13 +197,13 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
    INFORMAÇÕES ADICIONAIS
 ============================================================ */
 
-function drawAdditionalInfoBlock(doc, startY, quote) {
+function drawAdditionalInfoBlock(doc, startY, quote, brand) {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 14;
+  const pageBottomLimit = pageH - 24;
 
   const lines = [];
-
   if (quote.validity_date) lines.push(`Validade: ${quote.validity_date} dia(s)`);
   if (quote.payment_terms) lines.push(`Condições de pagamento: ${quote.payment_terms}`);
   if (quote.freight_type) lines.push(`Tipo de frete: ${quote.freight_type}`);
@@ -216,21 +211,23 @@ function drawAdditionalInfoBlock(doc, startY, quote) {
 
   const desc = safeText(quote.description || "").trim();
   const notes = safeText(quote.notes || "").trim();
+  const additionalInfo = safeText(quote.additional_info || "").trim();
 
-  // ✅ se notes == description, mostramos só uma vez
   const showNotes = notes && notes !== desc;
-
   const hasDesc = Boolean(desc);
   const hasNotes = Boolean(showNotes);
+  const hasAdditionalInfo = Boolean(additionalInfo);
 
-  if (lines.length === 0 && !hasDesc && !hasNotes) return startY;
+  if (lines.length === 0 && !hasDesc && !hasNotes && !hasAdditionalInfo) return startY;
 
-  // espaço aproximado
-  const needed = (hasDesc ? 34 : 0) + (hasNotes ? 34 : 0) + (lines.length ? 22 : 0);
-  if (startY + needed > pageH - 24) {
+  const ensureSpace = (needed, currentY) => {
+    if (currentY + needed <= pageBottomLimit) return currentY;
     doc.addPage();
-    startY = 40;
-  }
+    drawBrand(doc, brand);
+    return 40;
+  };
+
+  startY = ensureSpace(20, startY);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
@@ -244,46 +241,61 @@ function drawAdditionalInfoBlock(doc, startY, quote) {
   if (lines.length) {
     const txt = lines.join("\n");
     const chunk = doc.splitTextToSize(txt, pageW - margin * 2);
+    y = ensureSpace(chunk.length * 4 + 6, y);
     doc.text(chunk, margin, y);
     y += chunk.length * 4 + 2;
   }
 
-  // ✅ DESCRIÇÃO
   if (hasDesc) {
+    const descLines = doc.splitTextToSize(desc, pageW - margin * 2);
+    y = ensureSpace(descLines.length * 4 + 10, y);
     doc.setFont("helvetica", "bold");
     doc.text("Descrição da Cotação:", margin, y);
     y += 5;
-
     doc.setFont("helvetica", "normal");
-    const descLines = doc.splitTextToSize(desc, pageW - margin * 2);
     doc.text(descLines, margin, y);
     y += descLines.length * 4 + 2;
   }
 
-  // ✅ OBSERVAÇÕES (se forem diferentes da descrição)
   if (hasNotes) {
+    const noteLines = doc.splitTextToSize(notes, pageW - margin * 2);
+    y = ensureSpace(noteLines.length * 4 + 10, y);
     doc.setFont("helvetica", "bold");
     doc.text("Observações:", margin, y);
     y += 5;
-
     doc.setFont("helvetica", "normal");
-    const noteLines = doc.splitTextToSize(notes, pageW - margin * 2);
     doc.text(noteLines, margin, y);
     y += noteLines.length * 4 + 2;
+  }
+
+  if (hasAdditionalInfo) {
+    const infoLines = doc.splitTextToSize(additionalInfo, pageW - margin * 2);
+    y = ensureSpace(infoLines.length * 4 + 10, y);
+    doc.setFont("helvetica", "bold");
+    doc.text("Informações adicionais:", margin, y);
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    doc.text(infoLines, margin, y);
+    y += infoLines.length * 4 + 2;
   }
 
   return y;
 }
 
 /* ============================================================
-   ORÇAMENTO (dados da empresa abaixo do título + tabelas separadas)
+   ORÇAMENTO
 ============================================================ */
 
 function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, autor }) {
   const margin = 14;
   const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
 
   const contentTop = drawBrand(doc, brand);
+
+  // ajuste principal do cabeçalho
+  const headerMargin = 56;
+  const footerMargin = 24;
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
@@ -306,10 +318,12 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
   doc.text(`Data: ${quote.createdAtStr}`, margin, contentTop + 21);
 
   let y = contentTop + 28;
+
   if (sellerName) {
     doc.text(`Vendedor: ${sellerName}`, margin, y);
     y += 5;
   }
+
   if (solicitante) {
     doc.text(`Solicitante: ${solicitante}`, margin, y);
     y += 5;
@@ -375,9 +389,20 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
       head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Total"]],
       body: makeRows(list),
       startY: cursorY,
-      margin: { left: margin, right: margin },
+      margin: {
+        left: margin,
+        right: margin,
+        top: headerMargin,
+        bottom: footerMargin,
+      },
       styles: { fontSize: 8 },
-      didDrawPage: () => drawBrand(doc, brand),
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: 255,
+      },
+      willDrawPage: () => {
+        drawBrand(doc, brand);
+      },
     });
 
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
@@ -395,22 +420,40 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
       head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Total"]],
       body: [["", "Nenhum item adicionado", "", "", "", ""]],
       startY: cursorY,
-      margin: { left: margin, right: margin },
+      margin: {
+        left: margin,
+        right: margin,
+        top: headerMargin,
+        bottom: footerMargin,
+      },
       styles: { fontSize: 8 },
-      didDrawPage: () => drawBrand(doc, brand),
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: 255,
+      },
+      willDrawPage: () => {
+        drawBrand(doc, brand);
+      },
     });
 
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
+  }
+
+  let totalY = cursorY + 2;
+  if (totalY > pageH - 34) {
+    doc.addPage();
+    drawBrand(doc, brand);
+    totalY = 40;
   }
 
   const total = items.reduce((acc, it) => acc + (it?.isMeasured ? 0 : asNumber(it.total_price)), 0);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text(`TOTAL: ${formatCurrency(total)}`, pageW - margin, cursorY + 2, { align: "right" });
+  doc.text(`TOTAL: ${formatCurrency(total)}`, pageW - margin, totalY, { align: "right" });
 
-  const blockY = cursorY + 10;
-  drawAdditionalInfoBlock(doc, blockY, quote);
+  const blockY = totalY + 8;
+  drawAdditionalInfoBlock(doc, blockY, quote, brand);
 }
 
 /* ============================================================
@@ -433,6 +476,5 @@ export const generateQuotePDF = async (payload, options = {}) => {
     return { ok: true };
   }
 
-  // ✅ retorna Blob (e seu Quotes.jsx já sabe transformar em URL pra imprimir)
   return doc.output("blob");
 };
