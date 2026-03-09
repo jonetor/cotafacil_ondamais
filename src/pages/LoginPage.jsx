@@ -130,33 +130,14 @@ function LoginPage() {
               {loading ? "Entrando..." : "Entrar"}
             </Button>
           </form>
-
           <div className="text-center text-sm text-slate-400">
             <span>Não tem uma conta? </span>
             <Link to="/register" className="font-semibold text-blue-400 hover:text-blue-300">
-              Cadastre-se aqui
+              Contate o Administrador
             </Link>
           </div>
         </div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="mt-6 bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 text-xs text-slate-400 cursor-pointer"
-          onClick={fillAdmin}
-        >
-          <div className="flex items-start gap-3">
-            <Info className="w-4 h-4 mt-0.5 text-blue-400 flex-shrink-0" />
-            <div>
-              <p className="font-bold text-slate-300 mb-1">Acesso Rápido (Admin)</p>
-              <p><strong>Email:</strong> admin@ondamais.ai</p>
-              <p><strong>Senha:</strong> 102030</p>
-              <p className="mt-2 text-slate-500">Clique aqui para preencher automaticamente.</p>
-            </div>
-          </div>
         </motion.div>
-      </motion.div>
     </div>
   );
 }

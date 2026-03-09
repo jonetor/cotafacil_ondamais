@@ -2,8 +2,9 @@ import express from "express";
 import crypto from "node:crypto";
 
 import { db, initDb, norm } from "../db.js";
-import { requireAuth, requireAdmin } from "./auth.js";
+import { requireAuth } from "./auth.js";
 import { getVoalleToken } from "../voalleAuth.js";
+import { writeAuditLog } from "../audit.js";
 
 // ✅ garante tabela products
 initDb();
@@ -35,7 +36,6 @@ function toIntBool(v, def = 0) {
 function mapVoalleUseToType(use) {
   const u = String(use || "").toUpperCase();
   if (u === "P") return "PRODUTO";
-  // no Voalle esses itens "R" são combos/planos; no CotaFácil tratamos como serviço
   if (u === "R") return "SERVICO";
   return "SERVICO";
 }
@@ -44,8 +44,6 @@ function filterByUse(rows, useFilter) {
   const f = String(useFilter || "ALL").toUpperCase();
   if (f === "ALL") return rows;
 
-  // Voalle -> coluna use
-  // Manual -> inferimos: PRODUTO => P, demais => R
   return rows.filter((r) => {
     const src = String(r.source || "manual");
     if (src === "voalle") return String(r.use || "").toUpperCase() === f;
@@ -56,7 +54,6 @@ function filterByUse(rows, useFilter) {
 }
 
 function rowToApi(r) {
-  // ✅ mantém os campos do front e devolve extras (sem quebrar)
   return {
     id: r.id,
     cod: r.cod,
@@ -66,7 +63,6 @@ function rowToApi(r) {
     sale_price: r.sale_price,
     active: r.active === 1,
 
-    // extras
     source: r.source,
     use: r.use,
     originalPrice: r.original_price,
@@ -85,7 +81,6 @@ function rowToApi(r) {
 
 // -------------------------------
 // GET /api/products?use=ALL|P|R
-// Lista produtos do banco (manual + Voalle já sincronizado)
 // -------------------------------
 
 router.get("/products", requireAuth, (req, res) => {
@@ -126,10 +121,8 @@ router.get("/products", requireAuth, (req, res) => {
 
 // -------------------------------
 // POST /api/products
-// Cria produto MANUAL no banco (source='manual')
 // -------------------------------
 
-// ✅ Qualquer usuário autenticado pode criar itens manuais (admin + vendedor + usuários)
 router.post("/products", requireAuth, (req, res) => {
   try {
     const cod = String(req.body?.cod ?? req.body?.code ?? "").trim();
@@ -155,6 +148,22 @@ router.post("/products", requireAuth, (req, res) => {
     ).run(id, cod || null, description, type, unit || null, sale_price, active, t, t);
 
     const row = db.prepare(`SELECT * FROM products WHERE id = ?`).get(id);
+
+    writeAuditLog({
+      user: req.user,
+      action: "create",
+      entity: "product",
+      entity_id: id,
+      details: {
+        cod: cod || null,
+        description,
+        type,
+        unit: unit || null,
+        sale_price,
+        active,
+      },
+    });
+
     res.json({ ok: true, item: rowToApi(row) });
   } catch (e) {
     res.status(500).json({ ok: false, message: String(e?.message || e) });
@@ -163,7 +172,6 @@ router.post("/products", requireAuth, (req, res) => {
 
 // -------------------------------
 // POST /api/products/manual
-// Alias compatível com o front (mesmo INSERT do /products)
 // -------------------------------
 
 router.post("/products/manual", requireAuth, (req, res) => {
@@ -171,7 +179,6 @@ router.post("/products/manual", requireAuth, (req, res) => {
     const cod = String(req.body?.cod ?? req.body?.code ?? "").trim();
     const description = String(req.body?.description ?? req.body?.name ?? "").trim();
 
-    // Mapeia "use" para type
     const use = String(req.body?.use || "P").toUpperCase();
     const type = req.body?.type
       ? String(req.body.type).toUpperCase()
@@ -202,6 +209,23 @@ router.post("/products/manual", requireAuth, (req, res) => {
     ).run(id, cod || null, description, type, unit || null, sale_price, active, t, t);
 
     const row = db.prepare(`SELECT * FROM products WHERE id = ?`).get(id);
+
+    writeAuditLog({
+      user: req.user,
+      action: "create",
+      entity: "product",
+      entity_id: id,
+      details: {
+        cod: cod || null,
+        description,
+        type,
+        unit: unit || null,
+        sale_price,
+        active,
+        source: "manual",
+      },
+    });
+
     res.json({ ok: true, item: rowToApi(row) });
   } catch (e) {
     res.status(500).json({ ok: false, message: String(e?.message || e) });
@@ -210,7 +234,6 @@ router.post("/products/manual", requireAuth, (req, res) => {
 
 // -------------------------------
 // PUT /api/products/:id
-// Atualiza produto MANUAL
 // -------------------------------
 
 router.put("/products/:id", requireAuth, (req, res) => {
@@ -253,6 +276,32 @@ router.put("/products/:id", requireAuth, (req, res) => {
     ).run(cod || null, description, type, unit || null, sale_price, active, t, id);
 
     const row = db.prepare(`SELECT * FROM products WHERE id = ?`).get(id);
+
+    writeAuditLog({
+      user: req.user,
+      action: "update",
+      entity: "product",
+      entity_id: id,
+      details: {
+        before: {
+          cod: existing.cod,
+          description: existing.description,
+          type: existing.type,
+          unit: existing.unit,
+          sale_price: existing.sale_price,
+          active: existing.active,
+        },
+        after: {
+          cod: cod || null,
+          description,
+          type,
+          unit: unit || null,
+          sale_price,
+          active,
+        },
+      },
+    });
+
     res.json({ ok: true, item: rowToApi(row) });
   } catch (e) {
     res.status(500).json({ ok: false, message: String(e?.message || e) });
@@ -261,7 +310,6 @@ router.put("/products/:id", requireAuth, (req, res) => {
 
 // -------------------------------
 // DELETE /api/products/:id
-// Remove produto MANUAL
 // -------------------------------
 
 router.delete("/products/:id", requireAuth, (req, res) => {
@@ -269,7 +317,7 @@ router.delete("/products/:id", requireAuth, (req, res) => {
     const id = String(req.params.id || "").trim();
     if (!id) return res.status(400).json({ ok: false, message: "id é obrigatório" });
 
-    const row = db.prepare(`SELECT id, source FROM products WHERE id = ?`).get(id);
+    const row = db.prepare(`SELECT * FROM products WHERE id = ?`).get(id);
     if (!row) return res.status(404).json({ ok: false, message: "Produto não encontrado" });
     if (row.source !== "manual") {
       return res
@@ -278,6 +326,22 @@ router.delete("/products/:id", requireAuth, (req, res) => {
     }
 
     db.prepare(`DELETE FROM products WHERE id = ?`).run(id);
+
+    writeAuditLog({
+      user: req.user,
+      action: "delete",
+      entity: "product",
+      entity_id: id,
+      details: {
+        cod: row.cod,
+        description: row.description,
+        type: row.type,
+        unit: row.unit,
+        sale_price: row.sale_price,
+        active: row.active,
+      },
+    });
+
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, message: String(e?.message || e) });
@@ -286,10 +350,8 @@ router.delete("/products/:id", requireAuth, (req, res) => {
 
 // -------------------------------
 // POST /api/products/sync-voalle
-// Busca na Voalle e faz UPSERT no banco (source='voalle')
 // -------------------------------
 
-// ✅ Qualquer usuário autenticado pode solicitar sync (atualiza o catálogo para todos)
 router.post("/products/sync-voalle", requireAuth, async (req, res) => {
   try {
     const token = await getVoalleToken();
@@ -314,7 +376,6 @@ router.post("/products/sync-voalle", requireAuth, async (req, res) => {
 
     const data = JSON.parse(text);
 
-    // Alguns ambientes retornam {response:[...]} e outros retornam direto array
     const campaigns = Array.isArray(data?.response)
       ? data.response
       : Array.isArray(data)
@@ -344,10 +405,7 @@ router.post("/products/sync-voalle", requireAuth, async (req, res) => {
         rawCount += ps.length;
 
         for (const p of ps) {
-          // id composto evita colisão quando o mesmo code aparece em listas diferentes
           const id = `${p.code}-${priceListCode}-${campaignCode}`;
-
-          // Campos do upstream (pode ser title ou name dependendo do ambiente)
           const title = String(p.title ?? p.name ?? "").trim();
 
           flattened.push({
@@ -421,8 +479,7 @@ router.post("/products/sync-voalle", requireAuth, async (req, res) => {
         price_list_code=excluded.price_list_code,
         price_list_title=excluded.price_list_title,
         raw_json=excluded.raw_json,
-        updated_at=excluded.updated_at;
-      `
+        updated_at=excluded.updated_at;`
     );
 
     const tx = db.transaction((rows) => {
@@ -440,6 +497,21 @@ router.post("/products/sync-voalle", requireAuth, async (req, res) => {
     const totalVoalleDb = db
       .prepare(`SELECT COUNT(*) AS n FROM products WHERE source='voalle'`)
       .get().n;
+
+    writeAuditLog({
+      user: req.user,
+      action: "sync",
+      entity: "product",
+      entity_id: "voalle",
+      details: {
+        campaigns: campaigns.length,
+        rawCount,
+        fetched: flattened.length,
+        upserted,
+        totalDb,
+        totalVoalleDb,
+      },
+    });
 
     res.json({
       ok: true,

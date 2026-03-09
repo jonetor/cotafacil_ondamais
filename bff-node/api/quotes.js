@@ -1,6 +1,8 @@
 import express from "express";
 import crypto from "node:crypto";
 import { db } from "../db.js";
+import { requireAuth } from "./auth.js";
+import { writeAuditLog } from "../audit.js";
 
 const router = express.Router();
 
@@ -138,105 +140,113 @@ function calcTotalsFromPayload(items = []) {
    LISTAR COTAÇÕES
 ================================ */
 
-router.get("/", (req, res) => {
-  const rows = db
-    .prepare(
-      `
-      SELECT
-        q.*,
+router.get("/", requireAuth, (req, res) => {
+  try {
+    const rows = db
+      .prepare(
+        `
+        SELECT
+          q.*,
 
-        COALESCE((
-          SELECT SUM(qi.total_price)
-          FROM quote_items qi
-          WHERE qi.quote_id = q.id
-            AND UPPER(COALESCE(qi.item_type, '')) = 'PRODUTO'
-        ), 0) AS total_produtos,
+          COALESCE((
+            SELECT SUM(qi.total_price)
+            FROM quote_items qi
+            WHERE qi.quote_id = q.id
+              AND UPPER(COALESCE(qi.item_type, '')) = 'PRODUTO'
+          ), 0) AS total_produtos,
 
-        COALESCE((
-          SELECT SUM(qi.total_price)
-          FROM quote_items qi
-          WHERE qi.quote_id = q.id
-            AND UPPER(COALESCE(qi.item_type, '')) IN ('SERVICO', 'SERVIÇO')
-        ), 0) AS total_servicos,
+          COALESCE((
+            SELECT SUM(qi.total_price)
+            FROM quote_items qi
+            WHERE qi.quote_id = q.id
+              AND UPPER(COALESCE(qi.item_type, '')) IN ('SERVICO', 'SERVIÇO')
+          ), 0) AS total_servicos,
 
-        COALESCE((
-          SELECT SUM(qi.total_price)
-          FROM quote_items qi
-          WHERE qi.quote_id = q.id
-            AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
-        ), 0) AS total_comodato,
+          COALESCE((
+            SELECT SUM(qi.total_price)
+            FROM quote_items qi
+            WHERE qi.quote_id = q.id
+              AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
+          ), 0) AS total_comodato,
 
-        COALESCE((
-          SELECT COUNT(*)
-          FROM quote_items qi
-          WHERE qi.quote_id = q.id
-            AND UPPER(COALESCE(qi.item_type, '')) = 'PRODUTO'
-        ), 0) AS qtd_itens_produtos,
+          COALESCE((
+            SELECT COUNT(*)
+            FROM quote_items qi
+            WHERE qi.quote_id = q.id
+              AND UPPER(COALESCE(qi.item_type, '')) = 'PRODUTO'
+          ), 0) AS qtd_itens_produtos,
 
-        COALESCE((
-          SELECT COUNT(*)
-          FROM quote_items qi
-          WHERE qi.quote_id = q.id
-            AND UPPER(COALESCE(qi.item_type, '')) IN ('SERVICO', 'SERVIÇO')
-        ), 0) AS qtd_itens_servicos,
+          COALESCE((
+            SELECT COUNT(*)
+            FROM quote_items qi
+            WHERE qi.quote_id = q.id
+              AND UPPER(COALESCE(qi.item_type, '')) IN ('SERVICO', 'SERVIÇO')
+          ), 0) AS qtd_itens_servicos,
 
-        COALESCE((
-          SELECT COUNT(*)
-          FROM quote_items qi
-          WHERE qi.quote_id = q.id
-            AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
-        ), 0) AS qtd_itens_comodato
+          COALESCE((
+            SELECT COUNT(*)
+            FROM quote_items qi
+            WHERE qi.quote_id = q.id
+              AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
+          ), 0) AS qtd_itens_comodato
 
-      FROM quotes q
-      ORDER BY q.created_at DESC
-      `
-    )
-    .all();
+        FROM quotes q
+        ORDER BY q.created_at DESC
+        `
+      )
+      .all();
 
-  res.json(rows);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
 });
 
 /* ===============================
    BUSCAR UMA COTAÇÃO
 ================================ */
 
-router.get("/:id", (req, res) => {
-  const id = req.params.id;
+router.get("/:id", requireAuth, (req, res) => {
+  try {
+    const id = req.params.id;
 
-  const quote = db
-    .prepare(
-      `
-      SELECT *
-      FROM quotes
-      WHERE id = ?
-      `
-    )
-    .get(id);
+    const quote = db
+      .prepare(
+        `
+        SELECT *
+        FROM quotes
+        WHERE id = ?
+        `
+      )
+      .get(id);
 
-  if (!quote) {
-    return res.status(404).json({ error: "Cotação não encontrada" });
+    if (!quote) {
+      return res.status(404).json({ error: "Cotação não encontrada" });
+    }
+
+    const items = db
+      .prepare(
+        `
+        SELECT *
+        FROM quote_items
+        WHERE quote_id = ?
+        `
+      )
+      .all(id);
+
+    quote.items = items;
+
+    res.json(quote);
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
   }
-
-  const items = db
-    .prepare(
-      `
-      SELECT *
-      FROM quote_items
-      WHERE quote_id = ?
-      `
-    )
-    .all(id);
-
-  quote.items = items;
-
-  res.json(quote);
 });
 
 /* ===============================
    CRIAR COTAÇÃO
 ================================ */
 
-router.post("/", (req, res) => {
+router.post("/", requireAuth, (req, res) => {
   const data = req.body || {};
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -349,6 +359,22 @@ router.post("/", (req, res) => {
 
   try {
     trx();
+
+    writeAuditLog({
+      user: req.user,
+      action: "create",
+      entity: "quote",
+      entity_id: id,
+      details: {
+        proposal_number: data.proposal_number || "",
+        client_name: data.client_name || "",
+        client_id: data.client_id || null,
+        seller_id: data.seller_id || null,
+        total_value: totals.total_value,
+        items_count: items.length,
+      },
+    });
+
     res.json({ ok: true, id });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
@@ -359,13 +385,15 @@ router.post("/", (req, res) => {
    ATUALIZAR COTAÇÃO
 ================================ */
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requireAuth, (req, res) => {
   const id = req.params.id;
   const data = req.body || {};
   const now = Date.now();
 
   const items = Array.isArray(data.items) ? data.items : [];
   const totals = calcTotalsFromPayload(items);
+
+  const previous = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
 
   const trx = db.transaction(() => {
     const result = db
@@ -482,6 +510,33 @@ router.put("/:id", (req, res) => {
 
   try {
     trx();
+
+    writeAuditLog({
+      user: req.user,
+      action: "update",
+      entity: "quote",
+      entity_id: id,
+      details: {
+        before: previous
+          ? {
+              proposal_number: previous.proposal_number,
+              client_name: previous.client_name,
+              seller_id: previous.seller_id,
+              status: previous.status,
+              total_value: previous.total_value,
+            }
+          : null,
+        after: {
+          proposal_number: data.proposal_number || "",
+          client_name: data.client_name || "",
+          seller_id: data.seller_id || null,
+          status: data.status || "pending",
+          total_value: totals.total_value,
+          items_count: items.length,
+        },
+      },
+    });
+
     res.json({ ok: true, id });
   } catch (e) {
     res.status(404).json({ error: e?.message || String(e) });
@@ -492,9 +547,11 @@ router.put("/:id", (req, res) => {
    APROVAR COTAÇÃO
 ================================ */
 
-router.post("/:id/approve", (req, res) => {
+router.post("/:id/approve", requireAuth, (req, res) => {
   const id = req.params.id;
   const now = Date.now();
+
+  const previous = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
 
   const result = db.prepare(
     `
@@ -508,6 +565,22 @@ router.post("/:id/approve", (req, res) => {
     return res.status(404).json({ error: "Cotação não encontrada" });
   }
 
+  const updated = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
+
+  writeAuditLog({
+    user: req.user,
+    action: "approve",
+    entity: "quote",
+    entity_id: id,
+    details: {
+      before_status: previous?.status || null,
+      after_status: updated?.status || "approved",
+      proposal_number: updated?.proposal_number || "",
+      client_name: updated?.client_name || "",
+      total_value: updated?.total_value || 0,
+    },
+  });
+
   res.json({ ok: true });
 });
 
@@ -515,8 +588,10 @@ router.post("/:id/approve", (req, res) => {
    EXCLUIR COTAÇÃO
 ================================ */
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requireAuth, (req, res) => {
   const id = req.params.id;
+
+  const previous = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
 
   const trx = db.transaction(() => {
     db.prepare(`DELETE FROM quote_items WHERE quote_id = ?`).run(id);
@@ -525,6 +600,23 @@ router.delete("/:id", (req, res) => {
 
   try {
     trx();
+
+    writeAuditLog({
+      user: req.user,
+      action: "delete",
+      entity: "quote",
+      entity_id: id,
+      details: previous
+        ? {
+            proposal_number: previous.proposal_number,
+            client_name: previous.client_name,
+            seller_id: previous.seller_id,
+            status: previous.status,
+            total_value: previous.total_value,
+          }
+        : null,
+    });
+
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });

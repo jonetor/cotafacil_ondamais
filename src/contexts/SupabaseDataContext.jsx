@@ -27,6 +27,18 @@ function getApiBase() {
   return "";
 }
 
+function getStoredToken() {
+  try {
+    return (
+      localStorage.getItem("bff_token") ||
+      localStorage.getItem("token") ||
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
 export function SupabaseDataProvider({ children }) {
   const { user, bffFetch } = useAuth();
   const { toast } = useToast();
@@ -45,18 +57,24 @@ export function SupabaseDataProvider({ children }) {
 
   const plainFetch = useCallback(
     async (path, opts = {}) => {
+      const token = getStoredToken();
+
       const res = await fetch(`${apiBase}${path}`, {
         ...opts,
         headers: {
           "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(opts.headers || {}),
         },
       });
+
       const data = await safeJson(res);
+
       if (!res.ok) {
         const msg = data?.error || data?.message || `Erro HTTP ${res.status}`;
         throw new Error(msg);
       }
+
       return data;
     },
     [apiBase]
@@ -69,7 +87,11 @@ export function SupabaseDataProvider({ children }) {
       const r = await bffFetch("/api/auth/sellers", { method: "GET" });
       setSellers(normalizeArray(r.items));
     } catch (e) {
-      toast({ variant: "destructive", title: "Erro ao buscar vendedores", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar vendedores",
+        description: e?.message || String(e),
+      });
     }
   }, [user, bffFetch, toast]);
 
@@ -90,7 +112,11 @@ export function SupabaseDataProvider({ children }) {
       if (r?.items) setClients(normalizeArray(r.items));
       else setClients(normalizeArray(r));
     } catch (e) {
-      toast({ variant: "destructive", title: "Erro ao buscar clientes", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar clientes",
+        description: e?.message || String(e),
+      });
     }
   }, [user, plainFetch, toast]);
 
@@ -101,7 +127,11 @@ export function SupabaseDataProvider({ children }) {
       if (r?.items) setQuotes(normalizeArray(r.items));
       else setQuotes(normalizeArray(r));
     } catch (e) {
-      toast({ variant: "destructive", title: "Erro ao buscar cotações", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar cotações",
+        description: e?.message || String(e),
+      });
     }
   }, [user, plainFetch, toast]);
 
@@ -115,7 +145,6 @@ export function SupabaseDataProvider({ children }) {
     }
   }, [user, bffFetch]);
 
-  // ✅ alias explícito (as telas chamam reloadQuotes)
   const reloadQuotes = useCallback(async () => {
     await fetchQuotes();
   }, [fetchQuotes]);
@@ -145,24 +174,12 @@ export function SupabaseDataProvider({ children }) {
     [bffFetch, fetchUsers, fetchSellers]
   );
 
-  /**
-   * ✅ addQuote agora é UPSERT:
-   * - se vier quote.id -> PUT /api/quotes/:id (update)
-   * - senão -> POST /api/quotes (create)
-   */
   const addQuote = useCallback(
     async (quote) => {
-      const q = quote || {};
-      const isUpdate = Boolean(q?.id);
-
-      const path = isUpdate ? `/api/quotes/${q.id}` : `/api/quotes`;
-      const method = isUpdate ? "PUT" : "POST";
-
-      const r = await plainFetch(path, {
-        method,
-        body: JSON.stringify(q),
+      const r = await plainFetch("/api/quotes", {
+        method: "POST",
+        body: JSON.stringify(quote || {}),
       });
-
       await fetchQuotes();
       return r;
     },
@@ -196,12 +213,20 @@ export function SupabaseDataProvider({ children }) {
 
     async function boot() {
       setLoading(true);
+
       if (!user) {
         setLoading(false);
         return;
       }
+
       try {
-        await Promise.all([fetchSellers(), fetchClients(), fetchQuotes(), fetchProducts(), fetchUsers()]);
+        await Promise.all([
+          fetchSellers(),
+          fetchClients(),
+          fetchQuotes(),
+          fetchProducts(),
+          fetchUsers(),
+        ]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -225,18 +250,15 @@ export function SupabaseDataProvider({ children }) {
       addresses,
       users,
 
-      // loaders (úteis para telas)
       reloadQuotes,
       fetchQuotes,
 
-      // mutations esperadas pelas telas
       addUser,
       deleteUser,
-      addQuote,     // ✅ agora faz create/update automaticamente
+      addQuote,
       updateQuote,
       deleteQuote,
 
-      // placeholders
       addClient: async () => {
         throw new Error("addClient não implementado no modo SQLite. Use sincronização Voalle.");
       },

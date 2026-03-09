@@ -22,8 +22,7 @@ import fiscalImportRoutes from "./api/fiscalImport.js";
 import companiesRoutes from "./api/companies.js";
 import commissionRoutes from "./api/commission.js";
 import salesRoutes from "./api/sales.js";
-
-
+import auditRoutes from "./api/audit.js";
 
 
 const app = express();
@@ -38,6 +37,7 @@ app.use("/api", fiscalImportRoutes);
 app.use("/api/companies", companiesRoutes);
 app.use("/api", commissionRoutes);
 app.use("/api", salesRoutes);
+app.use("/api", auditRoutes);
 
 
 app.use(
