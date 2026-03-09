@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { 
-  FileText, 
+import {
+  FileText,
   DollarSign,
   CheckCircle,
   Clock,
@@ -9,7 +9,10 @@ import {
   Copy,
   Edit,
   FileSpreadsheet,
-  User
+  User,
+  Package,
+  Wrench,
+  Boxes
 } from 'lucide-react';
 import { useData } from '@/contexts/SupabaseDataContext';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
@@ -46,8 +49,8 @@ const DashboardPage = () => {
   const { quotes, clients, sellers } = useData();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [period, setPeriod] = useState('month');
 
+  const [period, setPeriod] = useState('month');
   const [sellerFilter, setSellerFilter] = useState("");
 
   const handleNotImplemented = (feature) => {
@@ -59,9 +62,7 @@ const DashboardPage = () => {
 
   const role = String(user?.role || user?.user_metadata?.role || "").toLowerCase();
   const isAdmin = role === "admin";
-
-  const loggedId = String(user?.sub || user?.id || "").trim();
-
+  const loggedId = String(user?.id || user?.sub || "").trim();
   const sellersList = Array.isArray(sellers) ? sellers : [];
 
   const filteredQuotes = useMemo(() => {
@@ -73,22 +74,28 @@ const DashboardPage = () => {
       if (Number.isNaN(quoteDate.getTime())) return false;
 
       if (period === 'day') return quoteDate.toDateString() === now.toDateString();
+
       if (period === 'week') {
         const oneWeekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
         return quoteDate >= oneWeekAgo;
       }
-      if (period === 'month') return quoteDate.getMonth() === now.getMonth() && quoteDate.getFullYear() === now.getFullYear();
-      if (period === 'year') return quoteDate.getFullYear() === now.getFullYear();
+
+      if (period === 'month') {
+        return quoteDate.getMonth() === now.getMonth() && quoteDate.getFullYear() === now.getFullYear();
+      }
+
+      if (period === 'year') {
+        return quoteDate.getFullYear() === now.getFullYear();
+      }
+
       return true;
     });
 
     if (!isAdmin) {
       if (!loggedId) return [];
       list = list.filter((q) => String(q.seller_id || "") === loggedId);
-    } else {
-      if (sellerFilter) {
-        list = list.filter((q) => String(q.seller_id || "") === String(sellerFilter));
-      }
+    } else if (sellerFilter) {
+      list = list.filter((q) => String(q.seller_id || "") === String(sellerFilter));
     }
 
     return list;
@@ -99,13 +106,27 @@ const DashboardPage = () => {
   const approvedValue = approvedQuotes.reduce((sum, q) => sum + (Number(q.total_value) || 0), 0);
   const pendingCount = filteredQuotes.filter(q => String(q.status || "").toLowerCase() === 'pending').length;
 
-  const recentQuotes = [...filteredQuotes].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
+  // ✅ separação por tipo
+  const totalProdutos = filteredQuotes.reduce((sum, q) => sum + (Number(q.total_produtos) || 0), 0);
+  const totalServicos = filteredQuotes.reduce((sum, q) => sum + (Number(q.total_servicos) || 0), 0);
+  const totalComodato = filteredQuotes.reduce((sum, q) => sum + (Number(q.total_comodato) || 0), 0);
+
+  const approvedProdutos = approvedQuotes.reduce((sum, q) => sum + (Number(q.total_produtos) || 0), 0);
+  const approvedServicos = approvedQuotes.reduce((sum, q) => sum + (Number(q.total_servicos) || 0), 0);
+  const approvedComodato = approvedQuotes.reduce((sum, q) => sum + (Number(q.total_comodato) || 0), 0);
+
+  const recentQuotes = [...filteredQuotes]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 5);
 
   const getStatusInfo = (status) => {
     switch(String(status || "").toLowerCase()) {
-      case 'approved': return { text: 'Aprovada', color: 'text-green-400', bg: 'bg-green-500/10' };
-      case 'rejected': return { text: 'Rejeitada', color: 'text-red-400', bg: 'bg-red-500/10' };
-      default: return { text: 'Pendente', color: 'text-yellow-400', bg: 'bg-yellow-500/10' };
+      case 'approved':
+        return { text: 'Aprovada', color: 'text-green-400', bg: 'bg-green-500/10' };
+      case 'rejected':
+        return { text: 'Rejeitada', color: 'text-red-400', bg: 'bg-red-500/10' };
+      default:
+        return { text: 'Pendente', color: 'text-yellow-400', bg: 'bg-yellow-500/10' };
     }
   };
 
@@ -121,6 +142,9 @@ const DashboardPage = () => {
     const email = s.email ? ` (${s.email})` : "";
     return `${s.name || s.nome || "Vendedor"}${email}`;
   };
+
+  const money = (v) =>
+    `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 
   return (
     <div className="text-slate-200 min-h-full -m-8 p-8">
@@ -141,10 +165,10 @@ const DashboardPage = () => {
             <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
               <div className="flex items-center gap-2 bg-slate-800/50 p-1 rounded-lg border border-slate-700">
                 {[{key: 'day', label: 'Dia'}, {key: 'week', label: 'Semana'}, {key: 'month', label: 'Mês'}, {key: 'year', label: 'Ano'}].map(p => (
-                  <Button 
-                    key={p.key} 
+                  <Button
+                    key={p.key}
                     onClick={() => setPeriod(p.key)}
-                    variant="ghost" 
+                    variant="ghost"
                     className={`capitalize transition-colors duration-300 rounded-md px-4 py-1 text-sm ${period === p.key ? 'bg-blue-600/30 text-blue-300' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'}`}
                   >
                     {p.label}
@@ -174,15 +198,23 @@ const DashboardPage = () => {
           </div>
         </motion.div>
 
+        {/* cards gerais */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <MetricCard icon={FileText} title="Propostas Enviadas" value={filteredQuotes.length} color="from-blue-400 to-cyan-400" delay={1} />
-          <MetricCard icon={DollarSign} title="Valor Total" value={`R$ ${totalValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`} color="from-purple-400 to-blue-400" delay={2} />
+          <MetricCard icon={DollarSign} title="Valor Total" value={money(totalValue)} color="from-purple-400 to-blue-400" delay={2} />
           <MetricCard icon={CheckCircle} title="Propostas Aprovadas" value={approvedQuotes.length} color="from-green-400 to-teal-400" delay={3} />
           <MetricCard icon={Clock} title="Aguardando Aceite" value={pendingCount} color="from-yellow-400 to-amber-400" delay={4} />
         </div>
 
+        {/* cards por tipo */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <MetricCard icon={Package} title="Vendas de Produtos" value={money(totalProdutos)} color="from-sky-400 to-blue-500" delay={5} />
+          <MetricCard icon={Wrench} title="Vendas de Serviços" value={money(totalServicos)} color="from-emerald-400 to-teal-500" delay={6} />
+          <MetricCard icon={Boxes} title="Vendas de Comodato" value={money(totalComodato)} color="from-amber-400 to-orange-500" delay={7} />
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.5, duration: 0.5 }}
@@ -213,6 +245,9 @@ const DashboardPage = () => {
                   <tr className="border-b border-slate-700 text-sm text-slate-400">
                     <th className="py-3 px-4 font-normal">Cliente</th>
                     <th className="py-3 px-4 font-normal text-right">Valor</th>
+                    <th className="py-3 px-4 font-normal text-right">Produtos</th>
+                    <th className="py-3 px-4 font-normal text-right">Serviços</th>
+                    <th className="py-3 px-4 font-normal text-right">Comodato</th>
                     <th className="py-3 px-4 font-normal text-center">Status</th>
                     <th className="py-3 px-4 font-normal text-right">Ações</th>
                   </tr>
@@ -221,25 +256,43 @@ const DashboardPage = () => {
                   {recentQuotes.length > 0 ? recentQuotes.map(quote => {
                     const status = getStatusInfo(quote.status);
                     const clientName = getClientName(quote.client_id, quote.client_name);
+
                     return (
-                      <motion.tr 
-                        key={quote.id} 
+                      <motion.tr
+                        key={quote.id}
                         className="border-b border-slate-800 hover:bg-slate-800/50 transition-colors"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                       >
                         <td className="py-3 px-4">
                           <p className="font-medium text-slate-200">{clientName}</p>
-                          <p className="text-sm text-slate-400">{new Date(quote.created_at).toLocaleDateString('pt-BR')}</p>
+                          <p className="text-sm text-slate-400">
+                            {new Date(quote.created_at).toLocaleDateString('pt-BR')}
+                          </p>
                         </td>
+
                         <td className="py-3 px-4 text-right font-mono text-slate-200">
-                          R$ {(quote.total_value || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                          {money(quote.total_value)}
                         </td>
+
+                        <td className="py-3 px-4 text-right font-mono text-slate-300">
+                          {money(quote.total_produtos)}
+                        </td>
+
+                        <td className="py-3 px-4 text-right font-mono text-slate-300">
+                          {money(quote.total_servicos)}
+                        </td>
+
+                        <td className="py-3 px-4 text-right font-mono text-slate-300">
+                          {money(quote.total_comodato)}
+                        </td>
+
                         <td className="py-3 px-4 text-center">
                           <span className={`px-3 py-1 text-xs font-semibold rounded-full ${status.bg} ${status.color}`}>
                             {status.text}
                           </span>
                         </td>
+
                         <td className="py-3 px-4 text-right">
                           <Button variant="ghost" size="icon" className="text-slate-400 hover:text-blue-400" onClick={() => handleNotImplemented('edição')}>
                             <Edit className="w-4 h-4" />
@@ -252,7 +305,7 @@ const DashboardPage = () => {
                     );
                   }) : (
                     <tr>
-                      <td colSpan="4" className="text-center py-16 text-slate-500">
+                      <td colSpan="7" className="text-center py-16 text-slate-500">
                         Nenhuma cotação no período selecionado.
                       </td>
                     </tr>
@@ -262,7 +315,7 @@ const DashboardPage = () => {
             </div>
           </motion.div>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.6, duration: 0.5 }}
@@ -281,7 +334,7 @@ const DashboardPage = () => {
                   <div className="flex justify-between items-center text-slate-300">
                     <p>Ticket Médio Aprovado:</p>
                     <p className="font-semibold text-slate-100">
-                      R$ {approvedQuotes.length > 0 ? (approvedValue/approvedQuotes.length).toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '0,00'}
+                      {approvedQuotes.length > 0 ? money(approvedValue / approvedQuotes.length) : 'R$ 0,00'}
                     </p>
                   </div>
                   <div className="flex justify-between items-center text-slate-300">
@@ -297,19 +350,26 @@ const DashboardPage = () => {
               <div className="space-y-3">
                 <div className="flex justify-between items-center text-slate-300">
                   <p>Valor Aprovado:</p>
-                  <p className="font-semibold text-green-400">
-                    R$ {approvedValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                  </p>
+                  <p className="font-semibold text-green-400">{money(approvedValue)}</p>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <p>Produtos Aprovados:</p>
+                  <p className="font-semibold text-slate-100">{money(approvedProdutos)}</p>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <p>Serviços Aprovados:</p>
+                  <p className="font-semibold text-slate-100">{money(approvedServicos)}</p>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <p>Comodato Aprovado:</p>
+                  <p className="font-semibold text-slate-100">{money(approvedComodato)}</p>
                 </div>
                 <div className="flex justify-between items-center text-slate-300">
                   <p>Impostos (mock):</p>
-                  <p className="font-semibold text-slate-100">
-                    R$ {(approvedValue * 0.1).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                  </p>
+                  <p className="font-semibold text-slate-100">{money(approvedValue * 0.1)}</p>
                 </div>
               </div>
             </div>
-
           </motion.div>
         </div>
       </div>

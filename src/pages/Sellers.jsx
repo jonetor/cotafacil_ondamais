@@ -1,9 +1,15 @@
-// voalle_front/src/pages/Sellers.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
-import { motion, AnimatePresence } from "framer-motion";
-import { UserCircle, Plus, Search } from "lucide-react";
-
+import { motion } from "framer-motion";
+import {
+  UserCircle,
+  Plus,
+  Search,
+  Pencil,
+  KeyRound,
+  Power,
+  Trash2,
+} from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,12 +20,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  listSellers,
+  adminCreateUser,
+  adminUpdateUser,
+  adminResetUserPassword,
+  adminSetUserStatus,
+  adminDeleteUser,
+} from "@/services/sellers";
 
-import { listSellers, adminCreateUser } from "@/services/sellers";
-
-// ✅ seu /api/auth/me retorna role dentro do token (admin/seller)
-// aqui a gente lê o token e usa o payload do /me?
-// melhor: chamar /api/auth/me (mas para simplicidade, usamos o token armazenado e o serviço /api/auth/me no Layout/Context)
 function getRoleFromJwt() {
   try {
     const token = localStorage.getItem("bff_token");
@@ -34,7 +43,6 @@ function getRoleFromJwt() {
 function NewSellerForm({ onCreated }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
-
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,7 +50,6 @@ function NewSellerForm({ onCreated }) {
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
-
     try {
       const user = await adminCreateUser({
         name,
@@ -59,7 +66,6 @@ function NewSellerForm({ onCreated }) {
       setName("");
       setEmail("");
       setPassword("");
-
       onCreated?.();
     } catch (err) {
       toast({
@@ -73,25 +79,131 @@ function NewSellerForm({ onCreated }) {
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3">
+    <form onSubmit={submit} className="space-y-4">
       <div>
         <label className="text-sm text-slate-300">Nome</label>
-        <Input className="input-field" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Input value={name} onChange={(e) => setName(e.target.value)} required />
       </div>
 
       <div>
         <label className="text-sm text-slate-300">Email</label>
-        <Input className="input-field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
       </div>
 
       <div>
         <label className="text-sm text-slate-300">Senha</label>
-        <Input className="input-field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
       </div>
 
-      <Button type="submit" className="btn-primary w-full" disabled={saving}>
-        {saving ? "Criando..." : "Criar vendedor"}
-      </Button>
+      <div className="flex justify-end">
+        <Button type="submit" className="btn-primary" disabled={saving}>
+          {saving ? "Criando..." : "Criar vendedor"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function EditSellerForm({ seller, onSaved }) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState(seller?.name || "");
+  const [email, setEmail] = useState(seller?.email || "");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await adminUpdateUser(seller.id, {
+        name,
+        email,
+        role: "seller",
+      });
+
+      toast({
+        title: "Vendedor atualizado!",
+        description: "Os dados do vendedor foram salvos.",
+      });
+
+      onSaved?.();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao editar vendedor",
+        description: String(err?.message || err),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <label className="text-sm text-slate-300">Nome</label>
+        <Input value={name} onChange={(e) => setName(e.target.value)} required />
+      </div>
+
+      <div>
+        <label className="text-sm text-slate-300">Email</label>
+        <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+      </div>
+
+      <div className="flex justify-end">
+        <Button type="submit" className="btn-primary" disabled={saving}>
+          {saving ? "Salvando..." : "Salvar alterações"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ResetPasswordForm({ seller, onSaved }) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [password, setPassword] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await adminResetUserPassword(seller.id, password);
+
+      toast({
+        title: "Senha resetada!",
+        description: `A nova senha de ${seller?.name || "Usuário"} foi definida.`,
+      });
+
+      setPassword("");
+      onSaved?.();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao resetar senha",
+        description: String(err?.message || err),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <label className="text-sm text-slate-300">Nova senha</label>
+        <Input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Button type="submit" className="btn-primary" disabled={saving}>
+          {saving ? "Resetando..." : "Resetar senha"}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -100,8 +212,11 @@ export default function Sellers() {
   const { toast } = useToast();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
+  const [openCreate, setOpenCreate] = useState(false);
+  const [openEdit, setOpenEdit] = useState(false);
+  const [openReset, setOpenReset] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedSeller, setSelectedSeller] = useState(null);
 
   const role = getRoleFromJwt();
   const isAdmin = role === "admin";
@@ -125,13 +240,11 @@ export default function Sellers() {
   useEffect(() => {
     if (!isAdmin) return;
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return items;
-
     return items.filter((s) => {
       const a = (s?.name || "").toLowerCase();
       const b = (s?.email || "").toLowerCase();
@@ -139,15 +252,53 @@ export default function Sellers() {
     });
   }, [items, search]);
 
+  const handleToggleStatus = async (seller) => {
+    try {
+      await adminSetUserStatus(seller.id, !seller.is_active);
+      toast({
+        title: seller.is_active ? "Vendedor desabilitado" : "Vendedor reativado",
+        description: `${seller.name} foi atualizado com sucesso.`,
+      });
+      await load();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao alterar status",
+        description: String(err?.message || err),
+      });
+    }
+  };
+
+  const handleDelete = async (seller) => {
+    const ok = window.confirm(`Deseja excluir permanentemente o vendedor "${seller.name}"?`);
+    if (!ok) return;
+
+    try {
+      await adminDeleteUser(seller.id);
+      toast({
+        title: "Vendedor excluído",
+        description: `${seller.name} foi removido permanentemente.`,
+      });
+      await load();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao excluir vendedor",
+        description: String(err?.message || err),
+      });
+    }
+  };
+
   if (!isAdmin) {
     return (
       <div className="text-slate-200 min-h-full -m-8 p-8">
-        <Helmet><title>Vendedores | ONDA+</title></Helmet>
-        <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-6">
-          <h1 className="text-2xl font-bold text-slate-100">Acesso restrito</h1>
-          <p className="text-slate-400 mt-2">
-            Somente o usuário <b>admin</b> pode acessar esta página.
-          </p>
+        <Helmet>
+          <title>Vendedores | ONDA+</title>
+        </Helmet>
+
+        <div className="floating-card p-8">
+          <h1 className="text-2xl font-bold text-white mb-2">Acesso restrito</h1>
+          <p className="text-slate-400">Somente o usuário admin pode acessar esta página.</p>
         </div>
       </div>
     );
@@ -155,30 +306,32 @@ export default function Sellers() {
 
   return (
     <div className="text-slate-200 min-h-full -m-8 p-8">
-      <Helmet><title>Vendedores | ONDA+</title></Helmet>
+      <Helmet>
+        <title>Vendedores | ONDA+</title>
+      </Helmet>
 
-      <div className="space-y-6">
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="space-y-8">
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-100">Vendedores</h1>
               <p className="text-slate-400 mt-1">Administração de vendedores (BFF).</p>
             </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog open={openCreate} onOpenChange={setOpenCreate}>
               <DialogTrigger asChild>
                 <Button className="btn-primary">
                   <Plus className="w-4 h-4 mr-2" />
                   Novo vendedor
                 </Button>
               </DialogTrigger>
-              <DialogContent className="glass-effect border-slate-700 text-slate-200">
+              <DialogContent className="glass-effect border-white/20 text-white">
                 <DialogHeader>
-                  <DialogTitle className="text-slate-100">Criar vendedor</DialogTitle>
+                  <DialogTitle>Criar vendedor</DialogTitle>
                 </DialogHeader>
                 <NewSellerForm
                   onCreated={() => {
-                    setOpen(false);
+                    setOpenCreate(false);
                     load();
                   }}
                 />
@@ -187,66 +340,145 @@ export default function Sellers() {
           </div>
         </motion.div>
 
-        <div className="relative">
+        <div className="relative w-full md:w-1/3">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
           <Input
             placeholder="Buscar por nome ou email..."
-            className="pl-10 w-full md:w-1/3 input-field"
+            className="pl-10 w-full input-field"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-slate-800">
-          <table className="min-w-full text-sm text-slate-200">
-            <thead className="bg-slate-800/60 text-slate-400">
-              <tr>
-                <th className="p-3 text-left font-semibold">Nome</th>
-                <th className="p-3 text-left font-semibold">E-mail</th>
-                <th className="p-3 text-center font-semibold">Status</th>
+        <div className="floating-card p-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-slate-400">
+              <tr className="border-b border-white/10">
+                <th className="text-left py-3 px-2">Nome</th>
+                <th className="text-left py-3 px-2">E-mail</th>
+                <th className="text-left py-3 px-2">Status</th>
+                <th className="text-right py-3 px-2">Ações</th>
               </tr>
             </thead>
+
             <tbody>
-              <AnimatePresence>
-                {loading ? (
-                  <tr className="border-t border-slate-800">
-                    <td className="p-4 text-slate-400" colSpan={3}>Carregando...</td>
+              {loading ? (
+                <tr>
+                  <td colSpan={4} className="py-10 text-center text-slate-500">
+                    Carregando...
+                  </td>
+                </tr>
+              ) : filtered.length > 0 ? (
+                filtered.map((s) => (
+                  <tr key={s.id} className="border-b border-white/5 hover:bg-white/5">
+                    <td className="py-3 px-2 text-slate-100 font-medium">{s.name}</td>
+                    <td className="py-3 px-2 text-slate-300">{s.email}</td>
+                    <td className="py-3 px-2">
+                      <span
+                        className={`px-2 py-1 rounded-md text-xs ${
+                          s.is_active ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"
+                        }`}
+                      >
+                        {s.is_active ? "Ativo" : "Inativo"}
+                      </span>
+                    </td>
+                    <td className="py-3 px-2">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="btn-secondary"
+                          title="Editar vendedor"
+                          onClick={() => {
+                            setSelectedSeller(s);
+                            setOpenEdit(true);
+                          }}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="btn-secondary"
+                          title="Resetar senha"
+                          onClick={() => {
+                            setSelectedSeller(s);
+                            setOpenReset(true);
+                          }}
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="btn-secondary"
+                          title={s.is_active ? "Desabilitar vendedor" : "Reativar vendedor"}
+                          onClick={() => handleToggleStatus(s)}
+                        >
+                          <Power className={`w-4 h-4 ${s.is_active ? "text-yellow-300" : "text-green-300"}`} />
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="btn-secondary"
+                          title="Excluir vendedor"
+                          onClick={() => handleDelete(s)}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-300" />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
-                ) : (
-                  filtered.map((s) => (
-                    <motion.tr
-                      key={s.id}
-                      className="border-t border-slate-800 hover:bg-slate-800/40 transition-colors"
-                      layout
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      <td className="p-3 font-medium text-slate-100">{s.name}</td>
-                      <td className="p-3">{s.email}</td>
-                      <td className="p-3 text-center">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          s.is_active ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
-                        }`}>
-                          {s.is_active ? "Ativo" : "Inativo"}
-                        </span>
-                      </td>
-                    </motion.tr>
-                  ))
-                )}
-              </AnimatePresence>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="py-10 text-center text-slate-500">
+                    Nenhum vendedor encontrado.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-
-          {!loading && filtered.length === 0 && (
-            <div className="text-center py-16 text-slate-500">
-              <UserCircle className="w-16 h-16 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold">Nenhum vendedor encontrado</h3>
-              <p>Tente ajustar sua busca ou crie um novo vendedor.</p>
-            </div>
-          )}
         </div>
       </div>
+
+      <Dialog open={openEdit} onOpenChange={setOpenEdit}>
+        <DialogContent className="glass-effect border-white/20 text-white">
+          <DialogHeader>
+            <DialogTitle>Editar vendedor</DialogTitle>
+          </DialogHeader>
+          {selectedSeller ? (
+            <EditSellerForm
+              seller={selectedSeller}
+              onSaved={() => {
+                setOpenEdit(false);
+                setSelectedSeller(null);
+                load();
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openReset} onOpenChange={setOpenReset}>
+        <DialogContent className="glass-effect border-white/20 text-white">
+          <DialogHeader>
+            <DialogTitle>Resetar senha</DialogTitle>
+          </DialogHeader>
+          {selectedSeller ? (
+            <ResetPasswordForm
+              seller={selectedSeller}
+              onSaved={() => {
+                setOpenReset(false);
+                setSelectedSeller(null);
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -3,19 +3,16 @@ import { Helmet } from "react-helmet";
 import axios from "axios";
 import { motion } from "framer-motion";
 import { UserCircle2, Save, KeyRound, Mail, User2, Loader2 } from "lucide-react";
-
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
 import { useAuth } from "@/contexts/SupabaseAuthContext";
 
 function safe(v) {
   return String(v ?? "").trim();
 }
 
-// ✅ padronizado com o resto do sistema
 const TOKEN_KEY = "bff_token";
 const USER_KEY = "bff_user";
 
@@ -31,27 +28,21 @@ function setTokenToStorage(token) {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token);
     else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function setUserToStorage(user) {
   try {
     if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
     else localStorage.removeItem(USER_KEY);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function clearAuthAndRedirect() {
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-  } catch {
-    // ignore
-  }
+  } catch {}
   if (window.location.pathname !== "/login") {
     window.location.href = "/login";
   }
@@ -64,11 +55,9 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [serverUser, setServerUser] = useState(null);
 
-  // Perfil
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
 
-  // Senha
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
@@ -84,18 +73,20 @@ export default function ProfilePage() {
     return r === "admin" ? "Administrador" : "Vendedor";
   }, [displayUser]);
 
-  // axios com token (não depende de interceptor global)
   const api = useMemo(() => {
     const instance = axios.create();
+
     instance.interceptors.request.use((config) => {
       const t = getTokenFromStorage();
-      if (t) config.headers.Authorization = `Bearer ${t}`;
+      if (t) {
+        config.headers.Authorization = `Bearer ${t}`;
+      }
       return config;
     });
+
     return instance;
   }, []);
 
-  // Carrega /api/auth/me (BFF)
   useEffect(() => {
     (async () => {
       try {
@@ -104,17 +95,15 @@ export default function ProfilePage() {
         const resp = await api.get("/api/auth/me");
         const data = resp?.data?.user || resp?.data || null;
 
-        // ✅ se backend retornou 401, desloga e vai pro login
-        // (axios normalmente cairá no catch; aqui é só segurança extra)
         if (!data && resp?.status === 401) {
           clearAuthAndRedirect();
           return;
         }
 
         setServerUser(data);
-        setUserToStorage(data); // ✅ atualiza cache do usuário atual
+        setUserToStorage(data);
 
-        const n = safe(data?.name || data?.nome || authUser?.name || authUser?.user_metadata?.name);
+        const n = safe(data?.name || authUser?.name || authUser?.user_metadata?.name);
         const e = safe(data?.email || authUser?.email);
 
         setName(n);
@@ -122,13 +111,11 @@ export default function ProfilePage() {
       } catch (e) {
         const status = e?.response?.status;
 
-        // ✅ definitivo: token expirou/inválido
         if (status === 401) {
           clearAuthAndRedirect();
           return;
         }
 
-        // fallback: auth local, sem quebrar
         console.warn("[ProfilePage] erro ao carregar /api/auth/me:", e?.response?.data || e?.message || e);
 
         const n = safe(authUser?.name || authUser?.user_metadata?.name || authUser?.email);
@@ -149,8 +136,7 @@ export default function ProfilePage() {
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [api, authUser, toast]);
 
   const handleSaveProfile = async () => {
     const n = safe(name);
@@ -160,6 +146,7 @@ export default function ProfilePage() {
       toast({ variant: "destructive", title: "Informe seu nome" });
       return;
     }
+
     if (!e || !e.includes("@")) {
       toast({ variant: "destructive", title: "Informe um email válido" });
       return;
@@ -170,28 +157,25 @@ export default function ProfilePage() {
 
       const resp = await api.put("/api/auth/me", { name: n, email: e });
 
-      // ✅ se o BFF retornar token novo, salva no lugar certo
       if (resp?.data?.token) {
         setTokenToStorage(resp.data.token);
       }
 
-      // ✅ normaliza retorno
-      const raw = resp?.data || null;
-      const updatedUser = raw?.user ? raw.user : raw;
+      const updatedUser = resp?.data?.user || resp?.data || null;
 
-      setServerUser(updatedUser);
-      setUserToStorage(updatedUser); // ✅ atualiza cache do usuário atual
+      if (updatedUser) {
+        setServerUser(updatedUser);
+        setUserToStorage(updatedUser);
+      }
 
       toast({ title: "Perfil atualizado!" });
     } catch (e1) {
       const status = e1?.response?.status;
-
       if (status === 401) {
         clearAuthAndRedirect();
         return;
       }
 
-      console.error(e1);
       toast({
         variant: "destructive",
         title: "Erro ao salvar perfil",
@@ -207,6 +191,7 @@ export default function ProfilePage() {
       toast({ variant: "destructive", title: "Informe a senha atual" });
       return;
     }
+
     if (safe(newPassword).length < 6) {
       toast({
         variant: "destructive",
@@ -215,8 +200,12 @@ export default function ProfilePage() {
       });
       return;
     }
+
     if (safe(newPassword) !== safe(confirmNewPassword)) {
-      toast({ variant: "destructive", title: "Confirmação da senha não confere" });
+      toast({
+        variant: "destructive",
+        title: "Confirmação da senha não confere",
+      });
       return;
     }
 
@@ -235,13 +224,11 @@ export default function ProfilePage() {
       toast({ title: "Senha atualizada!" });
     } catch (e2) {
       const status = e2?.response?.status;
-
       if (status === 401) {
         clearAuthAndRedirect();
         return;
       }
 
-      console.error(e2);
       toast({
         variant: "destructive",
         title: "Erro ao alterar senha",
@@ -261,11 +248,11 @@ export default function ProfilePage() {
         <title>Meu Perfil | ONDA+</title>
       </Helmet>
 
-      <div className="space-y-6">
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex items-start gap-3">
-            <div className="h-12 w-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center">
-              <UserCircle2 className="w-6 h-6 text-white/70" />
+      <div className="space-y-8">
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-sky-500/20 flex items-center justify-center">
+              <UserCircle2 className="w-9 h-9 text-sky-300" />
             </div>
 
             <div>
@@ -279,28 +266,26 @@ export default function ProfilePage() {
         </motion.div>
 
         {loading ? (
-          <div className="floating-card p-6 text-slate-400 flex items-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" />
+          <div className="floating-card p-8 flex items-center gap-3 text-slate-300">
+            <Loader2 className="w-5 h-5 animate-spin" />
             Carregando perfil...
           </div>
         ) : null}
 
-        {/* PERFIL */}
-        <div className="floating-card p-6 space-y-4">
-          <div className="text-slate-100 font-semibold">Editar Perfil</div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <motion.div
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="floating-card p-6 space-y-5"
+          >
+            <div className="flex items-center gap-2">
+              <User2 className="w-5 h-5 text-slate-300" />
+              <h2 className="text-xl font-semibold text-slate-100">Editar Perfil</h2>
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label>Nome</Label>
-              <div className="relative">
-                <User2 className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                <Input
-                  className="input-field pl-10"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Seu nome"
-                />
-              </div>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome" className="input-field" />
             </div>
 
             <div className="space-y-2">
@@ -308,80 +293,72 @@ export default function ProfilePage() {
               <div className="relative">
                 <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <Input
-                  className="input-field pl-10"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu@email.com"
+                  className="input-field pl-10"
                 />
               </div>
-              <div className="text-xs text-slate-500">
-                * Ao salvar, o BFF pode retornar um token novo (a página já salva automaticamente).
-              </div>
             </div>
 
-            <div className="md:col-span-2 flex justify-end">
-              <Button className="btn-primary" onClick={handleSaveProfile} disabled={savingProfile}>
-                <Save className="w-4 h-4 mr-2" />
-                {savingProfile ? "Salvando..." : "Salvar Perfil"}
-              </Button>
+            <p className="text-xs text-slate-500">
+              Ao salvar, o BFF pode retornar um token novo. A página já atualiza isso automaticamente.
+            </p>
+
+            <Button className="btn-primary" onClick={handleSaveProfile} disabled={savingProfile}>
+              <Save className="w-4 h-4 mr-2" />
+              {savingProfile ? "Salvando..." : "Salvar Perfil"}
+            </Button>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="floating-card p-6 space-y-5"
+          >
+            <div className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-slate-300" />
+              <h2 className="text-xl font-semibold text-slate-100">Alterar Senha</h2>
             </div>
-          </div>
-        </div>
 
-        {/* SENHA */}
-        <div className="floating-card p-6 space-y-4">
-          <div className="text-slate-100 font-semibold">Alterar Senha</div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <div className="space-y-2">
               <Label>Senha atual</Label>
               <Input
-                className="input-field"
                 type="password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 placeholder="••••••••"
+                className="input-field"
               />
             </div>
 
             <div className="space-y-2">
               <Label>Nova senha</Label>
               <Input
-                className="input-field"
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="••••••••"
+                className="input-field"
               />
             </div>
 
             <div className="space-y-2">
               <Label>Confirmar nova senha</Label>
               <Input
-                className="input-field"
                 type="password"
                 value={confirmNewPassword}
                 onChange={(e) => setConfirmNewPassword(e.target.value)}
                 placeholder="••••••••"
+                className="input-field"
               />
             </div>
 
-            <div className="md:col-span-3 flex justify-end">
-              <Button
-                variant="secondary"
-                className="btn-secondary"
-                onClick={handleChangePassword}
-                disabled={savingPass}
-              >
-                <KeyRound className="w-4 h-4 mr-2" />
-                {savingPass ? "Atualizando..." : "Atualizar senha"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="text-xs text-slate-500">
-            Se der 401, confirme se o token (bff_token) está no localStorage e se o BFF está validando Bearer token.
-          </div>
+            <Button className="btn-primary" onClick={handleChangePassword} disabled={savingPass}>
+              <KeyRound className="w-4 h-4 mr-2" />
+              {savingPass ? "Atualizando..." : "Atualizar senha"}
+            </Button>
+          </motion.div>
         </div>
       </div>
     </div>

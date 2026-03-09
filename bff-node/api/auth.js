@@ -1,4 +1,3 @@
-// bff-node/api/auth.js
 import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -48,7 +47,6 @@ export function requireAdmin(req, res, next) {
   return next();
 }
 
-// compat
 export const authRequired = requireAuth;
 
 // =========================
@@ -75,23 +73,21 @@ function getUserByEmail(email) {
 }
 
 // =========================
-// Refresh simples
+// Refresh
 // =========================
-// POST /api/auth/refresh
-// Header: Authorization: Bearer <token>
 router.post("/refresh", (req, res) => {
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ ok: false, error: "Token ausente" });
 
-  // 1) token ainda válido
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = getUserById(decoded.sub);
-    if (!user || user.is_active !== 1) return res.status(401).json({ ok: false, error: "Sessão inválida" });
+    if (!user || user.is_active !== 1) {
+      return res.status(401).json({ ok: false, error: "Sessão inválida" });
+    }
     const newToken = signToken(user);
     return res.json({ ok: true, token: newToken });
-  } catch (e) {
-    // 2) expirado: aceita dentro de uma janela
+  } catch {
     try {
       const decoded = jwt.decode(token);
       if (!decoded?.sub || !decoded?.exp) throw new Error("token inválido");
@@ -104,7 +100,9 @@ router.post("/refresh", (req, res) => {
       }
 
       const user = getUserById(decoded.sub);
-      if (!user || user.is_active !== 1) return res.status(401).json({ ok: false, error: "Sessão inválida" });
+      if (!user || user.is_active !== 1) {
+        return res.status(401).json({ ok: false, error: "Sessão inválida" });
+      }
 
       const newToken = signToken(user);
       return res.json({ ok: true, token: newToken });
@@ -115,9 +113,8 @@ router.post("/refresh", (req, res) => {
 });
 
 // =========================
-// Register (seller)
+// Register
 // =========================
-// POST /api/auth/register
 router.post("/register", (req, res) => {
   try {
     const email = norm(req.body?.email || "");
@@ -126,11 +123,6 @@ router.post("/register", (req, res) => {
 
     if (!email || !password || !name) {
       return res.status(400).json({ ok: false, error: "Nome, email e senha são obrigatórios" });
-    }
-
-    const allowedDomain = String(process.env.ALLOWED_REGISTER_DOMAIN || "").trim().toLowerCase();
-    if (allowedDomain && !email.endsWith("@" + allowedDomain)) {
-      return res.status(400).json({ ok: false, error: `Email deve ser do domínio @${allowedDomain}` });
     }
 
     const exists = getUserByEmail(email);
@@ -157,7 +149,6 @@ router.post("/register", (req, res) => {
 // =========================
 // Login
 // =========================
-// POST /api/auth/login
 router.post("/login", (req, res) => {
   try {
     const email = norm(req.body?.email || "");
@@ -190,13 +181,62 @@ router.post("/login", (req, res) => {
 // =========================
 // Me
 // =========================
-// GET /api/auth/me
 router.get("/me", requireAuth, (req, res) => {
   const id = String(req.user.sub);
   const user = getUserById(id);
+
   if (!user) return res.status(401).json({ ok: false, error: "Sessão inválida" });
   if (user.is_active !== 1) return res.status(403).json({ ok: false, error: "Usuário desativado" });
+
   return res.json({ ok: true, user });
+});
+
+// =========================
+// Update own profile
+// =========================
+router.put("/me", requireAuth, (req, res) => {
+  try {
+    const id = String(req.user.sub);
+    const name = String(req.body?.name || "").trim();
+    const email = norm(req.body?.email || "");
+
+    if (!name || !email) {
+      return res.status(400).json({ ok: false, error: "name e email são obrigatórios" });
+    }
+
+    const current = db
+      .prepare(`SELECT id, email, role, is_active FROM auth_users WHERE id = ?`)
+      .get(id);
+
+    if (!current || current.is_active !== 1) {
+      return res.status(401).json({ ok: false, error: "Sessão inválida" });
+    }
+
+    const emailInUse = db
+      .prepare(`SELECT id FROM auth_users WHERE email = ? AND id <> ?`)
+      .get(email, id);
+
+    if (emailInUse) {
+      return res.status(409).json({ ok: false, error: "E-mail já está em uso por outro usuário" });
+    }
+
+    db.prepare(
+      `UPDATE auth_users
+       SET name = ?, email = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(name, email, Date.now(), id);
+
+    const updatedUser = getUserById(id);
+    const newToken = signToken(updatedUser);
+
+    return res.json({
+      ok: true,
+      user: updatedUser,
+      token: newToken,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
 });
 
 // =========================
@@ -226,7 +266,9 @@ router.post("/change-password", requireAuth, (req, res) => {
     const now = Date.now();
     const password_hash = bcrypt.hashSync(newPassword, 10);
 
-    db.prepare(`UPDATE auth_users SET password_hash = ?, updated_at = ? WHERE id = ?`).run(password_hash, now, id);
+    db.prepare(`UPDATE auth_users SET password_hash = ?, updated_at = ? WHERE id = ?`)
+      .run(password_hash, now, id);
+
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -236,13 +278,12 @@ router.post("/change-password", requireAuth, (req, res) => {
 // =========================
 // Sellers list
 // =========================
-// GET /api/auth/sellers (auth required)
 router.get("/sellers", requireAuth, (req, res) => {
   const rows = db
     .prepare(
       `SELECT id, email, name, role, is_active, created_at, updated_at
        FROM auth_users
-       WHERE role = 'seller' AND is_active = 1
+       WHERE role = 'seller'
        ORDER BY name ASC`
     )
     .all();
@@ -250,11 +291,9 @@ router.get("/sellers", requireAuth, (req, res) => {
   return res.json({ ok: true, items: rows });
 });
 
-
 // =========================
-// Admin: list users
+// Admin routes
 // =========================
-// GET /api/auth/users (auth required + admin)
 router.get("/users", requireAuth, requireAdmin, (req, res) => {
   const rows = db
     .prepare(
@@ -263,28 +302,10 @@ router.get("/users", requireAuth, requireAdmin, (req, res) => {
        ORDER BY created_at DESC`
     )
     .all();
+
   return res.json({ ok: true, items: rows });
 });
 
-// =========================
-// Admin: delete (deactivate) user
-// =========================
-// DELETE /api/auth/users/:id
-router.delete("/users/:id", requireAuth, requireAdmin, (req, res) => {
-  const id = String(req.params.id || "").trim();
-  if (!id) return res.status(400).json({ ok: false, error: "id obrigatório" });
-
-  const exists = db.prepare(`SELECT id FROM auth_users WHERE id = ?`).get(id);
-  if (!exists) return res.status(404).json({ ok: false, error: "Usuário não encontrado" });
-
-  db.prepare(`UPDATE auth_users SET is_active = 0, updated_at = ? WHERE id = ?`).run(Date.now(), id);
-  return res.json({ ok: true });
-});
-
-// =========================
-// Admin: create user (seller/admin)
-// =========================
-// POST /api/auth/users   (rota esperada pelo front)
 router.post("/users", requireAuth, requireAdmin, (req, res) => {
   try {
     const email = norm(req.body?.email || "");
@@ -295,6 +316,7 @@ router.post("/users", requireAuth, requireAdmin, (req, res) => {
     if (!email || !name || !password) {
       return res.status(400).json({ ok: false, error: "email, name e password são obrigatórios" });
     }
+
     if (!["seller", "admin"].includes(role)) {
       return res.status(400).json({ ok: false, error: "role inválida (use 'seller' ou 'admin')" });
     }
@@ -317,7 +339,103 @@ router.post("/users", requireAuth, requireAdmin, (req, res) => {
   }
 });
 
-// Aliases compatíveis com versões antigas do front
+router.put("/users/:id", requireAuth, requireAdmin, (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const name = String(req.body?.name || "").trim();
+    const email = norm(req.body?.email || "");
+    const role = String(req.body?.role || "seller").trim() || "seller";
+
+    if (!id) return res.status(400).json({ ok: false, error: "id obrigatório" });
+    if (!name || !email) return res.status(400).json({ ok: false, error: "name e email são obrigatórios" });
+
+    const exists = db.prepare(`SELECT id FROM auth_users WHERE id = ?`).get(id);
+    if (!exists) return res.status(404).json({ ok: false, error: "Usuário não encontrado" });
+
+    const emailInUse = db.prepare(`SELECT id FROM auth_users WHERE email = ? AND id <> ?`).get(email, id);
+    if (emailInUse) return res.status(409).json({ ok: false, error: "E-mail já está em uso por outro usuário" });
+
+    db.prepare(
+      `UPDATE auth_users
+       SET name = ?, email = ?, role = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(name, email, role, Date.now(), id);
+
+    const user = getUserById(id);
+    return res.json({ ok: true, user });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+router.post("/users/:id/reset-password", requireAuth, requireAdmin, (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!id) return res.status(400).json({ ok: false, error: "id obrigatório" });
+    if (!newPassword) return res.status(400).json({ ok: false, error: "newPassword é obrigatório" });
+
+    const exists = db.prepare(`SELECT id FROM auth_users WHERE id = ?`).get(id);
+    if (!exists) return res.status(404).json({ ok: false, error: "Usuário não encontrado" });
+
+    const password_hash = bcrypt.hashSync(newPassword, 10);
+    db.prepare(`UPDATE auth_users SET password_hash = ?, updated_at = ? WHERE id = ?`)
+      .run(password_hash, Date.now(), id);
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+router.patch("/users/:id/status", requireAuth, requireAdmin, (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const is_active = Number(req.body?.is_active ? 1 : 0);
+
+    if (!id) return res.status(400).json({ ok: false, error: "id obrigatório" });
+
+    const exists = db.prepare(`SELECT id FROM auth_users WHERE id = ?`).get(id);
+    if (!exists) return res.status(404).json({ ok: false, error: "Usuário não encontrado" });
+
+    db.prepare(`UPDATE auth_users SET is_active = ?, updated_at = ? WHERE id = ?`)
+      .run(is_active, Date.now(), id);
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+router.delete("/users/:id/hard", requireAuth, requireAdmin, (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ ok: false, error: "id obrigatório" });
+
+    const exists = db.prepare(`SELECT id FROM auth_users WHERE id = ?`).get(id);
+    if (!exists) return res.status(404).json({ ok: false, error: "Usuário não encontrado" });
+
+    db.prepare(`DELETE FROM auth_users WHERE id = ?`).run(id);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+router.delete("/users/:id", requireAuth, requireAdmin, (req, res) => {
+  const id = String(req.params.id || "").trim();
+  if (!id) return res.status(400).json({ ok: false, error: "id obrigatório" });
+
+  const exists = db.prepare(`SELECT id FROM auth_users WHERE id = ?`).get(id);
+  if (!exists) return res.status(404).json({ ok: false, error: "Usuário não encontrado" });
+
+  db.prepare(`UPDATE auth_users SET is_active = 0, updated_at = ? WHERE id = ?`)
+    .run(Date.now(), id);
+
+  return res.json({ ok: true });
+});
+
 router.post("/auth_users", requireAuth, requireAdmin, (req, res) => {
   req.url = "/users";
   return router.handle(req, res);

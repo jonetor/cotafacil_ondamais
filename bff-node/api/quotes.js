@@ -142,9 +142,53 @@ router.get("/", (req, res) => {
   const rows = db
     .prepare(
       `
-      SELECT *
-      FROM quotes
-      ORDER BY created_at DESC
+      SELECT
+        q.*,
+
+        COALESCE((
+          SELECT SUM(qi.total_price)
+          FROM quote_items qi
+          WHERE qi.quote_id = q.id
+            AND UPPER(COALESCE(qi.item_type, '')) = 'PRODUTO'
+        ), 0) AS total_produtos,
+
+        COALESCE((
+          SELECT SUM(qi.total_price)
+          FROM quote_items qi
+          WHERE qi.quote_id = q.id
+            AND UPPER(COALESCE(qi.item_type, '')) IN ('SERVICO', 'SERVIÇO')
+        ), 0) AS total_servicos,
+
+        COALESCE((
+          SELECT SUM(qi.total_price)
+          FROM quote_items qi
+          WHERE qi.quote_id = q.id
+            AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
+        ), 0) AS total_comodato,
+
+        COALESCE((
+          SELECT COUNT(*)
+          FROM quote_items qi
+          WHERE qi.quote_id = q.id
+            AND UPPER(COALESCE(qi.item_type, '')) = 'PRODUTO'
+        ), 0) AS qtd_itens_produtos,
+
+        COALESCE((
+          SELECT COUNT(*)
+          FROM quote_items qi
+          WHERE qi.quote_id = q.id
+            AND UPPER(COALESCE(qi.item_type, '')) IN ('SERVICO', 'SERVIÇO')
+        ), 0) AS qtd_itens_servicos,
+
+        COALESCE((
+          SELECT COUNT(*)
+          FROM quote_items qi
+          WHERE qi.quote_id = q.id
+            AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
+        ), 0) AS qtd_itens_comodato
+
+      FROM quotes q
+      ORDER BY q.created_at DESC
       `
     )
     .all();
