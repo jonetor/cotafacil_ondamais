@@ -1,22 +1,21 @@
-// src/contexts/SupabaseAuthContext.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 const AuthContext = createContext(null);
 
-// ✅ chave ÚNICA do token
 const LS_TOKEN_KEY = "bff_token";
 
 function getBffUrl() {
-  // VITE_BFF_URL=http://localhost:3000
-  return (import.meta.env.VITE_BFF_URL || "http://localhost:3000").replace(/\/$/, "");
+  return (import.meta.env.VITE_BFF_URL || window.location.origin).replace(/\/$/, "");
 }
 
 function getToken() {
   return localStorage.getItem(LS_TOKEN_KEY) || "";
 }
+
 function setToken(t) {
   if (t) localStorage.setItem(LS_TOKEN_KEY, t);
 }
+
 function clearToken() {
   localStorage.removeItem(LS_TOKEN_KEY);
 }
@@ -31,9 +30,10 @@ async function bffFetch(path, opts = {}) {
     ...(opts.headers || {}),
   };
 
-  // só seta JSON se tiver body (evita preflight desnecessário em GET)
   const hasBody = opts.body !== undefined && opts.body !== null;
-  if (hasBody && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  if (hasBody && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
 
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -58,7 +58,6 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ===== sessão no boot =====
   useEffect(() => {
     let cancelled = false;
 
@@ -77,8 +76,7 @@ export function AuthProvider({ children }) {
       try {
         const me = await bffFetch("/api/auth/me", { method: "GET", token: t });
         if (!cancelled) setUser(me?.user || null);
-      } catch (e) {
-        // token inválido -> limpa
+      } catch {
         clearToken();
         if (!cancelled) setUser(null);
       } finally {
@@ -92,8 +90,6 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // ===== actions =====
-  // aceita signIn({email,password}) ou signIn(email,password)
   async function signIn(arg1, arg2) {
     const email = typeof arg1 === "object" ? arg1.email : arg1;
     const password = typeof arg1 === "object" ? arg1.password : arg2;
@@ -101,7 +97,7 @@ export function AuthProvider({ children }) {
     const data = await bffFetch("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
-      token: "" // não envia token antigo
+      token: "",
     });
 
     if (!data?.token) throw new Error("Login retornou sem token");
@@ -110,12 +106,11 @@ export function AuthProvider({ children }) {
     return data.user;
   }
 
-  // usado na RegisterPage
   async function signUp({ name, email, password }) {
     const data = await bffFetch("/api/auth/register", {
       method: "POST",
       body: JSON.stringify({ name, email, password }),
-      token: ""
+      token: "",
     });
 
     if (!data?.token) throw new Error("Cadastro retornou sem token");
@@ -151,6 +146,4 @@ export function useAuth() {
   return ctx;
 }
 
-
-// ✅ Alias para compatibilidade com imports antigos
 export const SupabaseAuthProvider = AuthProvider;

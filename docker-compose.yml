@@ -1,0 +1,42 @@
+services:
+  bff:
+    build:
+      context: .
+      dockerfile: Dockerfile.bff
+    container_name: cotafacil-bff
+    restart: unless-stopped
+    env_file:
+      - .env
+    expose:
+      - "3000"
+    volumes:
+      - ./bff-node/database.sqlite:/app/bff-node/database.sqlite
+      - ./bff-node/database.sqlite-shm:/app/bff-node/database.sqlite-shm
+      - ./bff-node/database.sqlite-wal:/app/bff-node/database.sqlite-wal
+      - ./bff-node/voalle-cache.sqlite:/app/bff-node/voalle-cache.sqlite
+      - ./bff-node/voalle-cache.sqlite-shm:/app/bff-node/voalle-cache.sqlite-shm
+      - ./bff-node/voalle-cache.sqlite-wal:/app/bff-node/voalle-cache.sqlite-wal
+      - ./data:/app/data
+
+  front:
+    build:
+      context: .
+      dockerfile: Dockerfile.front
+    container_name: cotafacil-front
+    restart: unless-stopped
+    depends_on:
+      - bff
+    expose:
+      - "80"
+
+  gateway:
+    image: nginx:alpine
+    container_name: cotafacil-gateway
+    restart: unless-stopped
+    depends_on:
+      - bff
+      - front
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro

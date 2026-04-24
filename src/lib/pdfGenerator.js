@@ -30,44 +30,147 @@ function formatDoc(docDigitsOrFormatted, isPF) {
   return isPF ? cpfMask(digits) : cnpjMask(digits);
 }
 
-/* ============================================================
-   BRAND ASSETS
-============================================================ */
-
-const BRAND_ASSETS = {
-  logo: "/brand/logo-fibra.png",
-  waveHeader: "/brand/onda-04.png",
-  waveFooter: "/brand/onda-01.png",
-};
-
-async function fetchAsDataURL(url) {
-  const resp = await fetch(url, { cache: "no-cache" }).catch(() => null);
-  if (!resp || !resp.ok) return null;
-
-  const blob = await resp.blob();
-  return await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = reject;
-    r.readAsDataURL(blob);
-  }).catch(() => null);
+function fitLines(doc, lines, width, maxLines) {
+  const out = [];
+  for (const line of lines) {
+    const wrapped = doc.splitTextToSize(String(line || ""), width);
+    for (const w of wrapped) {
+      out.push(w);
+      if (out.length >= maxLines) return out;
+    }
+  }
+  return out;
 }
 
-async function loadBrandImages() {
+/* ============================================================
+   EMPRESAS / LOGOS DINÂMICAS
+============================================================ */
+
+const COMPANY_VISUALS = {
+  "static:14429925000167": {
+    logo: "/brand/logo-fibra.png",
+    waveHeader: "/brand/onda-04.png",
+    waveFooter: "/brand/onda-01.png",
+  },
+  "static:46322439000131": {
+    logo: "/brand/logo-ondamais-tecnologia.png",
+    waveHeader: "/brand/onda-04.png",
+    waveFooter: "/brand/onda-01.png",
+  },
+  "static:44618753000130": {
+    logo: "/brand/logo-sainvest.png",
+    waveHeader: "/brand/onda-04.png",
+    waveFooter: "/brand/onda-01.png",
+  },
+  default: {
+    logo: "/brand/logo-fibra.png",
+    waveHeader: "/brand/onda-04.png",
+    waveFooter: "/brand/onda-01.png",
+  },
+};
+
+function getCompanyVisual(company) {
+  const id = String(company?.id || company?.company_id || "").trim();
+  return COMPANY_VISUALS[id] || COMPANY_VISUALS.default;
+}
+
+/* ============================================================
+   COMPRESSÃO DE IMAGENS
+============================================================ */
+
+async function loadImageElement(url) {
+  return await new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+async function fetchCompressedImage(url, options = {}) {
+  const {
+    maxWidth = 1200,
+    maxHeight = 400,
+    mimeType = "image/jpeg",
+    quality = 0.72,
+    background = "#FFFFFF",
+  } = options;
+
+  const img = await loadImageElement(url);
+  if (!img) return null;
+
+  const scale = Math.min(
+    1,
+    maxWidth / img.naturalWidth || 1,
+    maxHeight / img.naturalHeight || 1
+  );
+
+  const width = Math.max(1, Math.round(img.naturalWidth * scale));
+  const height = Math.max(1, Math.round(img.naturalHeight * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  if (mimeType === "image/jpeg") {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  ctx.drawImage(img, 0, 0, width, height);
+
+  const dataUrl = canvas.toDataURL(mimeType, quality);
+
+  return {
+    dataUrl,
+    width,
+    height,
+    format: mimeType === "image/png" ? "PNG" : "JPEG",
+  };
+}
+
+async function loadBrandImages(company) {
+  const visual = getCompanyVisual(company);
+
   const [logo, waveHeader, waveFooter] = await Promise.all([
-    fetchAsDataURL(BRAND_ASSETS.logo),
-    fetchAsDataURL(BRAND_ASSETS.waveHeader),
-    fetchAsDataURL(BRAND_ASSETS.waveFooter),
+    fetchCompressedImage(visual.logo, {
+      maxWidth: 900,
+      maxHeight: 260,
+      mimeType: "image/png",
+      quality: 0.9,
+      background: "#FFFFFF",
+    }),
+    fetchCompressedImage(visual.waveHeader, {
+      maxWidth: 1400,
+      maxHeight: 180,
+      mimeType: "image/jpeg",
+      quality: 0.55,
+      background: "#FFFFFF",
+    }),
+    fetchCompressedImage(visual.waveFooter, {
+      maxWidth: 1400,
+      maxHeight: 180,
+      mimeType: "image/jpeg",
+      quality: 0.55,
+      background: "#FFFFFF",
+    }),
   ]);
+
   return { logo, waveHeader, waveFooter };
 }
 
 /* ============================================================
-   COMPANY HEADER LINE
+   FALLBACK EMPRESA
 ============================================================ */
 
 const COMPANY_FALLBACK = {
+  id: "static:14429925000167",
   razao_social: "Fibra Onda Mais LTDA",
+  nome_fantasia: "Fibra Onda Mais",
   cnpj: "14.429.925/0001-67",
   ie: "15350790-0",
   endereco: "AV DAS NAÇÕES 2235 - CENTRO",
@@ -77,38 +180,54 @@ const COMPANY_FALLBACK = {
   fone: "0800 042 0900",
 };
 
-function buildCompanyDadosLine(company) {
-  const c = company || {};
-
-  const cnpjDigits = onlyDigits(c?.cnpj || COMPANY_FALLBACK.cnpj);
-  const cnpj = cnpjDigits ? cnpjMask(cnpjDigits) : COMPANY_FALLBACK.cnpj;
-
-  const ie = safeText(c?.ie || COMPANY_FALLBACK.ie).trim();
-  const endereco = safeText(c?.endereco || COMPANY_FALLBACK.endereco).trim();
-  const cep = safeText(c?.cep || COMPANY_FALLBACK.cep).trim();
-  const site = safeText(c?.site || COMPANY_FALLBACK.site).trim();
-  const email = safeText(c?.email || COMPANY_FALLBACK.email).trim();
-  const fone = safeText(c?.fone || COMPANY_FALLBACK.fone).trim();
-
-  return `CNPJ: ${cnpj} — I.E. ${ie} — ${endereco} — ${cep} — ${site} — EMAIL: ${email} — FONE: ${fone}`;
-}
-
 /* ============================================================
    BRAND DRAW
 ============================================================ */
 
-function drawBrand(doc, brand) {
+function drawBrand(doc, brand, company) {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
 
-  if (brand?.waveHeader) doc.addImage(brand.waveHeader, "PNG", 0, 0, pageW, 18);
+  if (brand?.waveHeader?.dataUrl) {
+    doc.addImage(
+      brand.waveHeader.dataUrl,
+      brand.waveHeader.format,
+      0,
+      0,
+      pageW,
+      18,
+      undefined,
+      "FAST"
+    );
+  }
 
   const topY = 16;
 
-  if (brand?.logo) {
-    const logoW = 80;
-    const logoH = 20;
-    doc.addImage(brand.logo, "PNG", pageW - logoW - 14, topY, logoW, logoH);
+  if (brand?.logo?.dataUrl) {
+    const logoW = 74;
+    const ratio = brand.logo.height / brand.logo.width || 0.25;
+    const logoH = Math.min(18, logoW * ratio);
+
+    doc.addImage(
+      brand.logo.dataUrl,
+      brand.logo.format,
+      pageW - logoW - 14,
+      topY,
+      logoW,
+      logoH,
+      undefined,
+      "FAST"
+    );
+  } else {
+    doc.setTextColor(7, 31, 77);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text(
+      safeText(company?.nome_fantasia || company?.name || "PROPOSTA"),
+      pageW - 14,
+      topY + 10,
+      { align: "right" }
+    );
   }
 
   doc.setFont("helvetica", "normal");
@@ -120,11 +239,53 @@ function drawBrand(doc, brand) {
   doc.setLineWidth(0.3);
   doc.line(14, topY + 26, pageW - 14, topY + 26);
 
-  if (brand?.waveFooter) doc.addImage(brand.waveFooter, "PNG", 0, pageH - 18, pageW, 18);
+  if (brand?.waveFooter?.dataUrl) {
+    doc.addImage(
+      brand.waveFooter.dataUrl,
+      brand.waveFooter.format,
+      0,
+      pageH - 18,
+      pageW,
+      18,
+      undefined,
+      "FAST"
+    );
+  }
 
   doc.setTextColor(0);
 
   return topY + 32;
+}
+
+/* ============================================================
+   INFO BOXES SEM TARJA
+============================================================ */
+
+function drawInfoBox(doc, { x, y, w, h, title, lines }) {
+  doc.setDrawColor(210, 220, 235);
+  doc.setFillColor(248, 250, 253);
+  doc.roundedRect(x, y, w, h, 2, 2, "FD");
+
+  doc.setTextColor(30, 41, 59);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text(title, x + 3, y + 6);
+
+  doc.setDrawColor(225, 230, 238);
+  doc.setLineWidth(0.2);
+  doc.line(x + 3, y + 8.5, x + w - 3, y + 8.5);
+
+  doc.setTextColor(30);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+
+  let lineY = y + 14;
+  const fitted = fitLines(doc, lines, w - 6, 6);
+
+  fitted.forEach((line) => {
+    doc.text(line, x + 3, lineY);
+    lineY += 4.2;
+  });
 }
 
 /* ============================================================
@@ -133,6 +294,8 @@ function drawBrand(doc, brand) {
 
 function normalizeForPdf({ quote, company, client, vendedor, autor }) {
   const q = quote || {};
+  const c = company || COMPANY_FALLBACK;
+
   const clientDoc =
     client?.cpf_cnpj || client?.document || client?.txIdFormated || client?.txId || "";
   const isPF = onlyDigits(clientDoc).length <= 11 || client?.tipo_pessoa === "PF";
@@ -180,7 +343,10 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
       additional_info,
       contactPerson: safeText(q.contactPerson || q.contact_person || "").trim(),
     },
-    company: company || null,
+    company: {
+      ...COMPANY_FALLBACK,
+      ...c,
+    },
     client: client
       ? {
           ...client,
@@ -194,96 +360,7 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
 }
 
 /* ============================================================
-   INFORMAÇÕES ADICIONAIS
-============================================================ */
-
-function drawAdditionalInfoBlock(doc, startY, quote, brand) {
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 14;
-  const pageBottomLimit = pageH - 24;
-
-  const lines = [];
-  if (quote.validity_date) lines.push(`Validade: ${quote.validity_date} dia(s)`);
-  if (quote.payment_terms) lines.push(`Condições de pagamento: ${quote.payment_terms}`);
-  if (quote.freight_type) lines.push(`Tipo de frete: ${quote.freight_type}`);
-  if (quote.delivery_location) lines.push(`Local de entrega: ${quote.delivery_location}`);
-
-  const desc = safeText(quote.description || "").trim();
-  const notes = safeText(quote.notes || "").trim();
-  const additionalInfo = safeText(quote.additional_info || "").trim();
-
-  const showNotes = notes && notes !== desc;
-  const hasDesc = Boolean(desc);
-  const hasNotes = Boolean(showNotes);
-  const hasAdditionalInfo = Boolean(additionalInfo);
-
-  if (lines.length === 0 && !hasDesc && !hasNotes && !hasAdditionalInfo) return startY;
-
-  const ensureSpace = (needed, currentY) => {
-    if (currentY + needed <= pageBottomLimit) return currentY;
-    doc.addPage();
-    drawBrand(doc, brand);
-    return 40;
-  };
-
-  startY = ensureSpace(20, startY);
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("INFORMAÇÕES ADICIONAIS", margin, startY);
-
-  let y = startY + 6;
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-
-  if (lines.length) {
-    const txt = lines.join("\n");
-    const chunk = doc.splitTextToSize(txt, pageW - margin * 2);
-    y = ensureSpace(chunk.length * 4 + 6, y);
-    doc.text(chunk, margin, y);
-    y += chunk.length * 4 + 2;
-  }
-
-  if (hasDesc) {
-    const descLines = doc.splitTextToSize(desc, pageW - margin * 2);
-    y = ensureSpace(descLines.length * 4 + 10, y);
-    doc.setFont("helvetica", "bold");
-    doc.text("Descrição da Cotação:", margin, y);
-    y += 5;
-    doc.setFont("helvetica", "normal");
-    doc.text(descLines, margin, y);
-    y += descLines.length * 4 + 2;
-  }
-
-  if (hasNotes) {
-    const noteLines = doc.splitTextToSize(notes, pageW - margin * 2);
-    y = ensureSpace(noteLines.length * 4 + 10, y);
-    doc.setFont("helvetica", "bold");
-    doc.text("Observações:", margin, y);
-    y += 5;
-    doc.setFont("helvetica", "normal");
-    doc.text(noteLines, margin, y);
-    y += noteLines.length * 4 + 2;
-  }
-
-  if (hasAdditionalInfo) {
-    const infoLines = doc.splitTextToSize(additionalInfo, pageW - margin * 2);
-    y = ensureSpace(infoLines.length * 4 + 10, y);
-    doc.setFont("helvetica", "bold");
-    doc.text("Informações adicionais:", margin, y);
-    y += 5;
-    doc.setFont("helvetica", "normal");
-    doc.text(infoLines, margin, y);
-    y += infoLines.length * 4 + 2;
-  }
-
-  return y;
-}
-
-/* ============================================================
-   ORÇAMENTO
+   PDF PRINCIPAL
 ============================================================ */
 
 function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, autor }) {
@@ -291,62 +368,79 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
 
-  const contentTop = drawBrand(doc, brand);
+  const contentTop = drawBrand(doc, brand, company);
 
-  // ajuste principal do cabeçalho
   const headerMargin = 56;
   const footerMargin = 24;
 
+  const sellerName = safeText(
+    vendedor?.name ||
+      vendedor?.nome ||
+      vendedor?.full_name ||
+      vendedor?.email ||
+      autor?.name ||
+      autor?.nome ||
+      ""
+  ).trim();
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text("ORÇAMENTO", pageW / 2, contentTop, { align: "center" });
-
-  const dadosEmpresa = buildCompanyDadosLine(company);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
-  doc.setTextColor(40);
-  const dadosLines = doc.splitTextToSize(dadosEmpresa, pageW - margin * 2);
-  doc.text(dadosLines, pageW / 2, contentTop + 6, { align: "center" });
-  doc.setTextColor(0);
-
-  const sellerName = safeText(vendedor?.name || vendedor?.nome || autor?.name || "").trim();
-  const solicitante = safeText(quote?.contactPerson || "").trim();
+  doc.text("PROPOSTA COMERCIAL", pageW / 2, contentTop, { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text(`Nº: ${quote.proposalNumber} • Revisão: ${quote.revision}`, margin, contentTop + 16);
-  doc.text(`Data: ${quote.createdAtStr}`, margin, contentTop + 21);
-
-  let y = contentTop + 28;
+  doc.text(`Nº: ${quote.proposalNumber} • Revisão: ${quote.revision}`, margin, contentTop + 8);
+  doc.text(`Data: ${quote.createdAtStr}`, pageW - margin, contentTop + 8, { align: "right" });
 
   if (sellerName) {
-    doc.text(`Vendedor: ${sellerName}`, margin, y);
-    y += 5;
+    doc.text(`Vendedor: ${sellerName}`, margin, contentTop + 13);
   }
 
-  if (solicitante) {
-    doc.text(`Solicitante: ${solicitante}`, margin, y);
-    y += 5;
-  }
+  let y = contentTop + 21;
 
-  if (client) {
-    const clientName = safeText(client?.nome_razao || client?.name || "").trim();
-    const clientDoc = formatDoc(client?.__doc, client?.__isPF);
+  const companyLines = [
+    safeText(company?.razao_social || company?.name || COMPANY_FALLBACK.razao_social),
+    `CNPJ: ${formatDoc(company?.cnpj || COMPANY_FALLBACK.cnpj, false)}`,
+    `I.E.: ${safeText(company?.ie || COMPANY_FALLBACK.ie)}`,
+    safeText(company?.endereco || COMPANY_FALLBACK.endereco),
+    safeText(company?.cep || COMPANY_FALLBACK.cep),
+    [safeText(company?.email || COMPANY_FALLBACK.email), safeText(company?.fone || COMPANY_FALLBACK.fone)]
+      .filter(Boolean)
+      .join(" | "),
+  ].filter(Boolean);
 
-    doc.setFont("helvetica", "bold");
-    doc.text("Cliente:", margin, y + 4);
-    doc.setFont("helvetica", "normal");
-    doc.text(clientName || "-", margin + 16, y + 4);
+  const clientName = safeText(client?.nome_razao || client?.name || quote.client_name || "-");
+  const clientDoc = formatDoc(
+    client?.__doc || quote.client_document || client?.cpf_cnpj || client?.txIdFormated || client?.txId,
+    client?.__isPF
+  );
 
-    if (clientDoc) {
-      doc.setFont("helvetica", "bold");
-      doc.text("CPF/CNPJ:", margin, y + 9);
-      doc.setFont("helvetica", "normal");
-      doc.text(clientDoc, margin + 20, y + 9);
-    }
+  const clientLines = [
+    clientName,
+    clientDoc ? `CPF/CNPJ: ${clientDoc}` : "CPF/CNPJ: -",
+    client?.endereco ? safeText(client.endereco) : "",
+    client?.cep ? safeText(client.cep) : "",
+    [safeText(client?.email), safeText(client?.telefone)].filter(Boolean).join(" | "),
+    quote.contactPerson ? `A/C: ${quote.contactPerson}` : "",
+  ].filter(Boolean);
 
-    y += 14;
-  }
+  drawInfoBox(doc, {
+    x: 14,
+    y,
+    w: 88,
+    h: 38,
+    title: "Fornecedor",
+    lines: companyLines,
+  });
+
+  drawInfoBox(doc, {
+    x: 108,
+    y,
+    w: 88,
+    h: 38,
+    title: "Cliente",
+    lines: clientLines,
+  });
 
   const items = Array.isArray(quote.items) ? quote.items : [];
 
@@ -370,20 +464,24 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
     ]);
 
   const drawSectionTitle = (title, startY) => {
+    doc.setFillColor(30, 41, 59);
+    doc.roundedRect(margin, startY - 4, pageW - margin * 2, 7, 1.5, 1.5, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text(title, margin, startY);
+    doc.setFontSize(9.5);
+    doc.setTextColor(255);
+    doc.text(title, margin + 3, startY + 0.8);
+    doc.setTextColor(0);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
   };
 
-  let cursorY = y + 6;
+  let cursorY = y + 46;
 
-  const drawTable = (title, list) => {
+  const drawTable = (title, list, subtotalLabel) => {
     if (!list.length) return;
 
     drawSectionTitle(title, cursorY);
-    cursorY += 4;
+    cursorY += 6;
 
     autoTable(doc, {
       head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Total"]],
@@ -395,26 +493,71 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
         top: headerMargin,
         bottom: footerMargin,
       },
-      styles: { fontSize: 8 },
+      styles: {
+        fontSize: 8,
+        lineColor: [225, 230, 238],
+        lineWidth: 0.15,
+        cellPadding: 2.2,
+      },
+      bodyStyles: {
+        textColor: [30, 30, 30],
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 253],
+      },
       headStyles: {
         fillColor: [30, 41, 59],
         textColor: 255,
+        fontStyle: "bold",
       },
       willDrawPage: () => {
-        drawBrand(doc, brand);
+        drawBrand(doc, brand, company);
+      },
+    });
+
+    cursorY = (doc.lastAutoTable?.finalY || cursorY) + 3;
+
+    const subtotal = list.reduce(
+      (acc, it) => acc + (it?.isMeasured ? 0 : asNumber(it.total_price)),
+      0
+    );
+
+    autoTable(doc, {
+      startY: cursorY,
+      body: [[subtotalLabel, formatCurrency(subtotal)]],
+      margin: { left: pageW - 90, right: margin },
+      styles: {
+        fontSize: 8.5,
+        fontStyle: "bold",
+        cellPadding: 2.5,
+        halign: "right",
+        lineColor: [225, 230, 238],
+        lineWidth: 0.15,
+      },
+      bodyStyles: {
+        textColor: [30, 30, 30],
+        fillColor: [245, 247, 250],
+      },
+      columnStyles: {
+        0: { halign: "left", cellWidth: 46 },
+        1: { halign: "right", cellWidth: 30 },
+      },
+      theme: "grid",
+      willDrawPage: () => {
+        drawBrand(doc, brand, company);
       },
     });
 
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
   };
 
-  drawTable("PRODUTOS", produtos);
-  drawTable("SERVIÇOS", servicos);
-  drawTable("SERVIÇOS SCM", scm);
+  drawTable("PRODUTOS", produtos, "SUBTOTAL PRODUTOS");
+  drawTable("SERVIÇOS", servicos, "SUBTOTAL SERVIÇOS");
+  drawTable("SERVIÇOS SCM", scm, "SUBTOTAL SERVIÇOS SCM");
 
   if (!produtos.length && !servicos.length && !scm.length) {
     drawSectionTitle("ITENS", cursorY);
-    cursorY += 4;
+    cursorY += 6;
 
     autoTable(doc, {
       head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Total"]],
@@ -426,34 +569,126 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
         top: headerMargin,
         bottom: footerMargin,
       },
-      styles: { fontSize: 8 },
+      styles: {
+        fontSize: 8,
+        lineColor: [225, 230, 238],
+        lineWidth: 0.15,
+        cellPadding: 2.2,
+      },
       headStyles: {
         fillColor: [30, 41, 59],
         textColor: 255,
+        fontStyle: "bold",
       },
       willDrawPage: () => {
-        drawBrand(doc, brand);
+        drawBrand(doc, brand, company);
       },
     });
 
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
   }
 
-  let totalY = cursorY + 2;
-  if (totalY > pageH - 34) {
+  let sectionY = cursorY + 2;
+  if (sectionY > pageH - 80) {
     doc.addPage();
-    drawBrand(doc, brand);
-    totalY = 40;
+    drawBrand(doc, brand, company);
+    sectionY = 40;
   }
 
-  const total = items.reduce((acc, it) => acc + (it?.isMeasured ? 0 : asNumber(it.total_price)), 0);
+  const totalProdutos = produtos.reduce(
+    (acc, it) => acc + (it?.isMeasured ? 0 : asNumber(it.total_price)),
+    0
+  );
+
+  const totalServicos = servicos.reduce(
+    (acc, it) => acc + (it?.isMeasured ? 0 : asNumber(it.total_price)),
+    0
+  );
+
+  const totalScm = scm.reduce(
+    (acc, it) => acc + (it?.isMeasured ? 0 : asNumber(it.total_price)),
+    0
+  );
+
+  const totalGeral = totalProdutos + totalServicos + totalScm;
+
+  const leftX = margin;
+  const leftW = 118;
+  const rightX = pageW - 64 - margin;
+
+  const infoLines = [];
+  if (quote.validity_date) infoLines.push(`Validade: ${quote.validity_date} dia(s)`);
+  if (quote.payment_terms) infoLines.push(`Condições de pagamento: ${quote.payment_terms}`);
+  if (quote.freight_type) infoLines.push(`Tipo de frete: ${quote.freight_type}`);
+  if (quote.delivery_location) infoLines.push(`Local de entrega: ${quote.delivery_location}`);
+
+  const desc = safeText(quote.description || "").trim();
+  const notes = safeText(quote.notes || "").trim();
+  const additionalInfo = safeText(quote.additional_info || "").trim();
+  const showNotes = notes && notes !== desc;
+
+  if (desc) infoLines.push(`Descrição: ${desc}`);
+  if (showNotes) infoLines.push(`Observações: ${notes}`);
+  if (additionalInfo) infoLines.push(`Informações adicionais: ${additionalInfo}`);
+
+  let infoStartY = sectionY;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(`TOTAL: ${formatCurrency(total)}`, pageW - margin, totalY, { align: "right" });
+  doc.setFontSize(10);
+  doc.text("INFORMAÇÕES ADICIONAIS", leftX, infoStartY);
 
-  const blockY = totalY + 8;
-  drawAdditionalInfoBlock(doc, blockY, quote, brand);
+  let infoTextY = infoStartY + 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+
+  const wrappedInfo = [];
+  infoLines.forEach((line) => {
+    const chunk = doc.splitTextToSize(String(line || ""), leftW);
+    chunk.forEach((c) => wrappedInfo.push(c));
+    wrappedInfo.push("");
+  });
+
+  if (wrappedInfo.length) {
+    doc.text(wrappedInfo, leftX, infoTextY);
+  }
+
+  const infoHeight = wrappedInfo.length ? wrappedInfo.length * 4 + 8 : 12;
+
+  autoTable(doc, {
+    startY: sectionY,
+    body: [
+      ["TOTAL PRODUTOS", formatCurrency(totalProdutos)],
+      ["TOTAL SERVIÇOS", formatCurrency(totalServicos)],
+      ["TOTAL SERVIÇOS SCM", formatCurrency(totalScm)],
+      ["TOTAL GERAL", formatCurrency(totalGeral)],
+    ],
+    margin: { left: rightX, right: margin },
+    styles: {
+      fontSize: 9,
+      fontStyle: "bold",
+      cellPadding: 3,
+      halign: "right",
+      lineColor: [225, 230, 238],
+      lineWidth: 0.15,
+    },
+    bodyStyles: {
+      textColor: [30, 30, 30],
+    },
+    columnStyles: {
+      0: { halign: "left", cellWidth: 36 },
+      1: { halign: "right", cellWidth: 28 },
+    },
+    didParseCell: (data) => {
+      if (data.row.index === 3) {
+        data.cell.styles.fillColor = [30, 41, 59];
+        data.cell.styles.textColor = [255, 255, 255];
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+    theme: "grid",
+  });
+
+  return Math.max(infoStartY + infoHeight, doc.lastAutoTable.finalY || sectionY);
 }
 
 /* ============================================================
@@ -464,8 +699,14 @@ export const generateQuotePDF = async (payload, options = {}) => {
   const { quote, client, company, vendedor, autor } = normalizeForPdf(payload);
   const download = options.download !== false;
 
-  const brand = await loadBrandImages();
-  const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+  const brand = await loadBrandImages(company);
+  const doc = new jsPDF({
+    orientation: "p",
+    unit: "mm",
+    format: "a4",
+    compress: true,
+    putOnlyUsedFonts: true,
+  });
 
   generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, autor });
 

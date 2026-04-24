@@ -20,19 +20,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useNavigate } from "react-router-dom";
+import { useData } from "@/contexts/SupabaseDataContext";
 
 /* =========================
    HELPERS
 ========================= */
-
-async function safeJson(res) {
-  const text = await res.text();
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return { ok: false, error: text || "Resposta inválida" };
-  }
-}
 
 function onlyDigits(s) {
   return String(s || "").replace(/\D/g, "");
@@ -46,6 +38,28 @@ function norm(s) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function toUpperCompanyPayload(payload = {}) {
+  return {
+    ...payload,
+    razao_social: String(payload.razao_social || "").toUpperCase(),
+    nome_fantasia: String(payload.nome_fantasia || "").toUpperCase(),
+    name: String(
+      payload.name ||
+        payload.nome_fantasia ||
+        payload.razao_social ||
+        ""
+    ).toUpperCase(),
+    fantasia: String(
+      payload.fantasia ||
+        payload.nome_fantasia ||
+        payload.name ||
+        ""
+    ).toUpperCase(),
+    cnpj: fmtCNPJ(payload.cnpj || ""),
+    cnpj_digits: onlyDigits(payload.cnpj || payload.cnpj_digits || ""),
+  };
+}
+
 /* =========================
    PAGE
 ========================= */
@@ -54,6 +68,14 @@ const Companies = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const {
+    companies,
+    loading,
+    fetchCompanies,
+    addCompany,
+    deleteCompany,
+  } = useData();
+
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingData, setEditingData] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -61,47 +83,35 @@ const Companies = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [companyToDelete, setCompanyToDelete] = useState(null);
 
-  const [companies, setCompanies] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // ✅ LOAD from BFF
-  const fetchCompanies = useCallback(async () => {
+  const reloadCompanies = useCallback(async () => {
     try {
-      setLoading(true);
-      const res = await fetch("/api/companies", { method: "GET" });
-      const data = await safeJson(res);
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-
-      const list = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-      setCompanies(list);
+      await fetchCompanies?.();
     } catch (e) {
       toast({
         variant: "destructive",
         title: "Erro ao carregar empresas",
         description: e?.message || String(e),
       });
-      setCompanies([]);
-    } finally {
-      setLoading(false);
     }
-  }, [toast]);
+  }, [fetchCompanies, toast]);
 
   useEffect(() => {
-    fetchCompanies();
-  }, [fetchCompanies]);
+    reloadCompanies();
+  }, [reloadCompanies]);
 
-  // ✅ padroniza para CompanyCard (se ele espera campos antigos)
   const companiesNormalized = useMemo(() => {
     const list = Array.isArray(companies) ? companies : [];
+
     return list.map((c) => ({
       ...c,
-      // compat: algumas telas antigas usam "fantasia"
       fantasia: c.fantasia || c.nome_fantasia || c.nomeFantasia || c.name || "",
-      // compat: algumas telas antigas usam "name"
-      name: c.name || c.nome_fantasia || c.fantasia || "",
-      // compat: mantém cnpj
+      name:
+        c.name ||
+        c.razao_social ||
+        c.nome_fantasia ||
+        c.fantasia ||
+        "",
       cnpj: c.cnpj || "",
-      // compat: address placeholder (no modo atual não há addresses)
       address: c.address || {},
     }));
   }, [companies]);
@@ -113,60 +123,69 @@ const Companies = () => {
     if (!s && !sDigits) return companiesNormalized;
 
     return companiesNormalized.filter((company) => {
-      const name = norm(company?.name);
-      const fantasia = norm(company?.fantasia);
+      const razao = norm(company?.razao_social || company?.name);
+      const fantasia = norm(company?.fantasia || company?.nome_fantasia);
       const cnpjDigits = onlyDigits(company?.cnpj);
 
       if (sDigits) return cnpjDigits.includes(sDigits);
-      return name.includes(s) || fantasia.includes(s);
+      return razao.includes(s) || fantasia.includes(s);
     });
   }, [companiesNormalized, searchTerm]);
 
   const handleNewCompany = () => {
     setEditingData(null);
-
-    // No seu modo atual (BFF SQLite), ainda não existe POST/PUT de companies.
-    // Para não quebrar, apenas abre o modal e informa.
     setIsFormOpen(true);
-    toast({
-      title: "Cadastro de empresas",
-      description: "No modo atual, as empresas estão fixas no BFF (/api/companies). Se quiser CRUD, eu adiciono no backend.",
-    });
   };
 
   const handleEditCompany = (company) => {
-    // Mantém o fluxo antigo
+    if (!company?.id) return;
     navigate(`/empresas/${company.id}`);
   };
 
-  const handleSaveCompany = async () => {
-    // No modo atual, não há addCompany no backend.
-    // Mantemos o modal sem quebrar e orientamos.
+  const handleSaveCompany = async (formData) => {
     setIsSubmitting(true);
     try {
+      const payload = toUpperCompanyPayload(formData);
+
+      await addCompany(payload);
+
+      toast({
+        title: "Empresa cadastrada com sucesso",
+        description: `${payload.razao_social || payload.name} foi adicionada.`,
+      });
+
+      setIsFormOpen(false);
+      setEditingData(null);
+      await reloadCompanies();
+    } catch (e) {
       toast({
         variant: "destructive",
-        title: "Não implementado",
-        description: "CRUD de empresas ainda não existe no backend. Posso implementar /api/companies (POST/PUT/DELETE).",
+        title: "Erro ao salvar empresa",
+        description: e?.message || String(e),
       });
     } finally {
       setIsSubmitting(false);
-      setIsFormOpen(false);
-      setEditingData(null);
-      // recarrega só para manter consistente
-      fetchCompanies();
     }
   };
 
   const handleDeleteCompany = async (id) => {
-    // No modo atual, não há delete.
-    toast({
-      variant: "destructive",
-      title: "Não implementado",
-      description: "Excluir empresa ainda não está habilitado no backend.",
-    });
-    setCompanyToDelete(null);
-    // se quiser, depois eu implemento DELETE /api/companies/:id e removo esse bloqueio
+    try {
+      await deleteCompany(id);
+
+      toast({
+        title: "Empresa excluída",
+        description: "A empresa foi removida com sucesso.",
+      });
+
+      setCompanyToDelete(null);
+      await reloadCompanies();
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao excluir empresa",
+        description: e?.message || String(e),
+      });
+    }
   };
 
   return (
@@ -180,14 +199,17 @@ const Companies = () => {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-100">Empresas</h1>
-              <p className="text-slate-400 mt-1">Empresas cadastradas para emissão de orçamentos.</p>
+              <p className="text-slate-400 mt-1">
+                Empresas cadastradas para emissão de orçamentos.
+              </p>
             </div>
 
             <div className="flex items-center gap-2">
               <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                 <DialogTrigger asChild>
                   <Button className="btn-primary" onClick={handleNewCompany}>
-                    <Plus className="w-4 h-4 mr-2" /> Nova Empresa
+                    <Plus className="w-4 h-4 mr-2" />
+                    Nova Empresa
                   </Button>
                 </DialogTrigger>
 
@@ -225,7 +247,13 @@ const Companies = () => {
               {filteredCompanies.map((company, index) => (
                 <CompanyCard
                   key={company.id}
-                  company={company}
+                  company={{
+                    ...company,
+                    name: String(company.name || "").toUpperCase(),
+                    fantasia: String(company.fantasia || "").toUpperCase(),
+                    nome_fantasia: String(company.nome_fantasia || company.fantasia || "").toUpperCase(),
+                    razao_social: String(company.razao_social || company.name || "").toUpperCase(),
+                  }}
                   index={index}
                   onEdit={handleEditCompany}
                   onDelete={() => setCompanyToDelete(company)}
@@ -254,15 +282,22 @@ const Companies = () => {
 
             <AlertDialogDescription className="text-slate-400">
               Tem certeza de que deseja excluir a empresa{" "}
-              <span className="font-bold text-amber-400">{companyToDelete?.name}</span>? Esta ação não pode ser desfeita.
+              <span className="font-bold text-amber-400">
+                {String(
+                  companyToDelete?.razao_social ||
+                    companyToDelete?.name ||
+                    ""
+                ).toUpperCase()}
+              </span>
+              ? Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel className="btn-secondary">Cancelar</AlertDialogCancel>
             <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
               onClick={() => handleDeleteCompany(companyToDelete?.id)}
-              className="bg-red-500 hover:bg-red-600"
             >
               Excluir
             </AlertDialogAction>

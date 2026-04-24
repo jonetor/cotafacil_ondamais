@@ -1,12 +1,12 @@
 // src/pages/QuoteFormPage.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useData } from "@/contexts/SupabaseDataContext";
 import { useToast } from "@/components/ui/use-toast";
-import { Save, Building, FileDown, User, UserSquare, Users2 } from "lucide-react";
+import { Save, Building, FileDown, UserSquare } from "lucide-react";
 import QuoteItemsManager from "@/components/quotes/QuoteItemsManager";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import QuoteTotals from "@/components/quotes/QuoteTotals";
@@ -16,15 +16,16 @@ import { Input } from "@/components/ui/input";
 import { listSellers } from "@/services/sellers";
 import { useAuth } from "@/contexts/SupabaseAuthContext";
 import { uid } from "@/lib/utils";
+import ClientSearchSelectRemote from "@/components/quotes/ClientSearchSelectRemote";
 
 const onlyDigits = (s) => String(s || "").replace(/\D/g, "");
 
 const COMPANY_OPTIONS = [
   {
     id: "static:14429925000167",
-    name: "Fibra Onda+ LTDA",
-    razao_social: "Fibra Onda Mais LTDA",
-    nome_fantasia: "Fibra Onda Mais",
+    name: "FIBRA ONDA MAIS LTDA",
+    razao_social: "FIBRA ONDA MAIS LTDA",
+    nome_fantasia: "FIBRA ONDA MAIS",
     cnpj: "14.429.925/0001-67",
     cnpjDigits: "14429925000167",
     ie: "15350790-0",
@@ -36,17 +37,17 @@ const COMPANY_OPTIONS = [
   },
   {
     id: "static:46322439000131",
-    name: "Onda Mais Tecnologia",
-    razao_social: "Onda Mais Tecnologia LTDA",
-    nome_fantasia: "Onda Mais Tecnologia",
+    name: "ONDA MAIS TECNOLOGIA",
+    razao_social: "ONDA MAIS TECNOLOGIA LTDA",
+    nome_fantasia: "ONDA MAIS TECNOLOGIA",
     cnpj: "46.322.439/0001-31",
     cnpjDigits: "46322439000131",
   },
   {
     id: "static:44618753000130",
-    name: "S & A Invest",
-    razao_social: "S & A Invest LTDA",
-    nome_fantasia: "S & A Invest",
+    name: "S & A INVEST",
+    razao_social: "S & A INVEST LTDA",
+    nome_fantasia: "S & A INVEST",
     cnpj: "44.618.753/0001-30",
     cnpjDigits: "44618753000130",
   },
@@ -55,34 +56,11 @@ const COMPANY_OPTIONS = [
 const DEFAULT_COMPANY = COMPANY_OPTIONS[0];
 const DEFAULT_COMPANY_ID = DEFAULT_COMPANY.id;
 
-const readClienteFromStorage = () => {
-  try {
-    return JSON.parse(localStorage.getItem("cotacao_cliente") || "null");
-  } catch {
-    return null;
-  }
-};
-
-const clearClienteFromStorage = () => {
-  try {
-    localStorage.removeItem("cotacao_cliente");
-  } catch {}
-};
-
 const getNextProposalNumber = (quotes) => {
   if (!Array.isArray(quotes) || quotes.length === 0) return 1;
   const maxNumber = Math.max(...quotes.map((q) => parseInt(q?.proposal_number, 10) || 0));
   return maxNumber + 1;
 };
-
-function formatClientLabel(c) {
-  const doc = c?.cpf_cnpj || c?.txIdFormated || c?.txId || c?.document || "";
-  const nome = c?.name || c?.nome_razao || c?.nome || "";
-  const docTxt = String(doc).trim();
-  const nomeTxt = String(nome).trim();
-  if (docTxt && nomeTxt) return `${docTxt} - ${nomeTxt}`;
-  return nomeTxt || docTxt || "Cliente";
-}
 
 function safeText(v) {
   return v === 0 ? "0" : v ? String(v) : "";
@@ -127,6 +105,39 @@ function findCompanyById(id) {
   return COMPANY_OPTIONS.find((c) => String(c.id) === sid) || null;
 }
 
+function getClientName(client) {
+  return String(
+    client?.name ||
+      client?.nome_razao ||
+      client?.nome ||
+      client?.nome_fantasia ||
+      ""
+  );
+}
+
+function resolveClientFromSources({ rawClientId, rawClientName, rawClientDoc, safeClients }) {
+  const id = String(rawClientId || "").trim();
+  const docDigits = onlyDigits(rawClientDoc || "");
+  const nameNorm = String(rawClientName || "").trim().toLowerCase();
+
+  let found =
+    safeClients.find((c) => String(c?.id || "") === id) ||
+    safeClients.find((c) => onlyDigits(c?.cpf_cnpj) === docDigits) ||
+    safeClients.find((c) => onlyDigits(c?.txId) === docDigits);
+
+  if (!found && nameNorm) {
+    found = safeClients.find((c) => {
+      const n1 = String(c?.name || "").trim().toLowerCase();
+      const n2 = String(c?.nome_razao || "").trim().toLowerCase();
+      const n3 = String(c?.nome || "").trim().toLowerCase();
+      const n4 = String(c?.nome_fantasia || "").trim().toLowerCase();
+      return [n1, n2, n3, n4].includes(nameNorm);
+    });
+  }
+
+  return found || null;
+}
+
 export default function QuoteFormPage() {
   const {
     clients,
@@ -153,8 +164,8 @@ export default function QuoteFormPage() {
   const [bffSellers, setBffSellers] = useState([]);
   const [loadingSellers, setLoadingSellers] = useState(false);
   const [externalClientOption, setExternalClientOption] = useState(null);
+  const [selectedClient, setSelectedClient] = useState(null);
 
-  // ✅ usa id OU sub
   const loggedUserId = String(bffUser?.id || bffUser?.sub || "").trim();
   const loggedUserRole = String(bffUser?.role || bffUser?.user_metadata?.role || "").toLowerCase();
   const isSeller = loggedUserRole === "seller";
@@ -217,55 +228,128 @@ export default function QuoteFormPage() {
       } catch (e) {
         console.error("[QuoteFormPage] erro listSellers:", e);
         setBffSellers([]);
-        toast({ variant: "destructive", title: "Erro ao carregar vendedores", description: String(e?.message || e) });
+        toast({
+          variant: "destructive",
+          title: "Erro ao carregar vendedores",
+          description: String(e?.message || e),
+        });
       } finally {
         setLoadingSellers(false);
       }
     })();
   }, [toast]);
 
+  const applySelectedClient = useCallback(
+    (client) => {
+      if (!client) return;
+
+      const rawId = client?.id ? String(client.id) : "";
+      const docDigits = onlyDigits(
+        client?.cpf_cnpj || client?.txIdFormated || client?.txId || client?.document || ""
+      );
+      const nome = getClientName(client);
+
+      const matchInternal =
+        safeClients.find((c) => String(c?.id) === rawId) ||
+        safeClients.find((c) => onlyDigits(c?.cpf_cnpj) === docDigits) ||
+        safeClients.find((c) => onlyDigits(c?.txId) === docDigits);
+
+      if (matchInternal) {
+        setExternalClientOption(null);
+        setSelectedClient(matchInternal);
+        setCurrentQuote((prev) => ({
+          ...prev,
+          client_id: String(matchInternal.id),
+          contactPerson: prev.contactPerson?.trim() ? prev.contactPerson : getClientName(matchInternal),
+        }));
+        return;
+      }
+
+      const tmp = {
+        id: rawId ? `voalle:${rawId}` : `voalle:${docDigits || uid()}`,
+        name: nome,
+        nome_razao: nome,
+        cpf_cnpj: client?.cpf_cnpj || client?.txIdFormated || client?.txId || client?.document || "",
+        city: client?.city || "",
+        state: client?.state || "",
+        email: client?.email || "",
+        telefone: client?.telefone || "",
+      };
+
+      setExternalClientOption(tmp);
+      setSelectedClient(tmp);
+      setCurrentQuote((prev) => ({
+        ...prev,
+        client_id: String(tmp.id),
+        contactPerson: prev.contactPerson?.trim() ? prev.contactPerson : nome,
+      }));
+    },
+    [safeClients]
+  );
+
   useEffect(() => {
     async function loadEditQuote() {
       if (!id) return;
 
       const preload = location.state?.quote;
-      if (preload) {
-        setCurrentQuote((prev) => ({
-          ...prev,
-          ...preload,
-          user_id: safeText(preload.user_id || loggedUserId),
-          seller_id: safeText(preload.seller_id || loggedUserId),
-          items: normalizeItems(preload.items),
-          company_id: String(preload.company_id || DEFAULT_COMPANY_ID),
-          validity_date: safeText(preload.validity_date),
-          payment_terms: safeText(preload.payment_terms),
-          freight_type: safeText(preload.freight_type) || "CIF",
-          delivery_location: safeText(preload.delivery_location),
-          description: safeText(preload.description || preload.notes || ""),
-          additional_info: safeText(preload.additional_info || preload.additionalInfo || ""),
-          contactPerson: safeText(preload.contact_person || preload.contactPerson || prev.contactPerson),
-        }));
-        return;
+      const sourceQuote =
+        preload || safeQuotes.find((q) => String(q?.id) === String(id));
+
+      if (!sourceQuote) return;
+
+      const resolvedClient = resolveClientFromSources({
+        rawClientId: sourceQuote.client_id,
+        rawClientName: sourceQuote.client_name,
+        rawClientDoc: sourceQuote.client_document,
+        safeClients,
+      });
+
+      const fallbackExternal =
+        !resolvedClient && (sourceQuote.client_name || sourceQuote.client_document)
+          ? {
+              id: String(sourceQuote.client_id || `legacy:${uid()}`),
+              name: safeText(sourceQuote.client_name),
+              nome_razao: safeText(sourceQuote.client_name),
+              cpf_cnpj: safeText(sourceQuote.client_document),
+            }
+          : null;
+
+      if (resolvedClient) {
+        setSelectedClient(resolvedClient);
+        setExternalClientOption(null);
+      } else if (fallbackExternal) {
+        setSelectedClient(fallbackExternal);
+        setExternalClientOption(fallbackExternal);
+      } else {
+        setSelectedClient(null);
+        setExternalClientOption(null);
       }
 
-      const quote = safeQuotes.find((q) => String(q?.id) === String(id));
-      if (quote) {
-        setCurrentQuote((prev) => ({
-          ...prev,
-          ...quote,
-          user_id: safeText(quote.user_id || loggedUserId),
-          seller_id: safeText(quote.seller_id || loggedUserId),
-          items: normalizeItems(quote.items),
-          company_id: String(quote.company_id || DEFAULT_COMPANY_ID),
-          validity_date: safeText(quote.validity_date),
-          payment_terms: safeText(quote.payment_terms),
-          freight_type: safeText(quote.freight_type) || "CIF",
-          delivery_location: safeText(quote.delivery_location),
-          description: safeText(quote.description || quote.notes || ""),
-          additional_info: safeText(quote.additional_info || quote.additionalInfo || ""),
-          contactPerson: safeText(quote.contact_person || quote.contactPerson || prev.contactPerson),
-        }));
-      }
+      setCurrentQuote((prev) => ({
+        ...prev,
+        ...sourceQuote,
+        user_id: safeText(sourceQuote.user_id || loggedUserId),
+        seller_id: safeText(sourceQuote.seller_id || loggedUserId),
+        items: normalizeItems(sourceQuote.items),
+        company_id: String(sourceQuote.company_id || DEFAULT_COMPANY_ID),
+        client_id: String(
+          resolvedClient?.id ||
+            fallbackExternal?.id ||
+            sourceQuote.client_id ||
+            ""
+        ),
+        validity_date: safeText(sourceQuote.validity_date),
+        payment_terms: safeText(sourceQuote.payment_terms),
+        freight_type: safeText(sourceQuote.freight_type) || "CIF",
+        delivery_location: safeText(sourceQuote.delivery_location),
+        description: safeText(sourceQuote.description || sourceQuote.notes || ""),
+        additional_info: safeText(sourceQuote.additional_info || sourceQuote.additionalInfo || ""),
+        contactPerson: safeText(
+          sourceQuote.contact_person ||
+            sourceQuote.contactPerson ||
+            prev.contactPerson
+        ),
+      }));
     }
 
     if (!id) {
@@ -275,14 +359,17 @@ export default function QuoteFormPage() {
         user_id: loggedUserId,
         seller_id: prev.seller_id || loggedUserId,
         company_id: String(prev.company_id || DEFAULT_COMPANY_ID),
+        client_id: "",
+        contactPerson: "",
       }));
+      setSelectedClient(null);
+      setExternalClientOption(null);
       return;
     }
 
     loadEditQuote();
-  }, [id, location.state, safeQuotes, loggedUserId]);
+  }, [id, location.state, safeQuotes, loggedUserId, safeClients]);
 
-  // ✅ vendedor logado vira vendedor padrão sempre que estiver vazio
   useEffect(() => {
     if (!loggedUserId) return;
 
@@ -297,45 +384,14 @@ export default function QuoteFormPage() {
   }, [loggedUserId]);
 
   useEffect(() => {
-    const cli = location.state?.cliente || readClienteFromStorage();
+    if (id) return;
+
+    const cli = location.state?.cliente;
     if (!cli) return;
 
-    const docDigits = onlyDigits(cli.cpf_cnpj || cli.txIdFormated || cli.txId || "");
-    const nome = cli.nome_razao || cli.name || cli.nome || "";
-
-    const matchInternal =
-      safeClients.find((c) => onlyDigits(c?.cpf_cnpj) === docDigits) ||
-      safeClients.find((c) => onlyDigits(c?.txId) === docDigits);
-
-    if (matchInternal) {
-      setExternalClientOption(null);
-      setCurrentQuote((prev) => ({
-        ...prev,
-        client_id: String(matchInternal.id),
-        contactPerson: prev.contactPerson?.trim()
-          ? prev.contactPerson
-          : String(matchInternal.name || matchInternal.nome_razao || nome || ""),
-      }));
-    } else {
-      const tmp = {
-        id: `voalle:${cli.id}`,
-        name: nome,
-        nome_razao: nome,
-        cpf_cnpj: cli.cpf_cnpj || cli.txIdFormated || cli.txId || "",
-        city: cli.city,
-        state: cli.state,
-      };
-      setExternalClientOption(tmp);
-      setCurrentQuote((prev) => ({
-        ...prev,
-        client_id: String(tmp.id),
-        contactPerson: prev.contactPerson?.trim() ? prev.contactPerson : String(nome || ""),
-      }));
-    }
-
-    clearClienteFromStorage();
-    if (location.state?.cliente) navigate(location.pathname, { replace: true, state: {} });
-  }, [location.key, safeClients, navigate, location.pathname, location.state]);
+    applySelectedClient(cli);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [id, location.state?.cliente, navigate, location.pathname, applySelectedClient]);
 
   const handleItemsChange = (newItems) =>
     setCurrentQuote((prev) => ({ ...prev, items: normalizeItems(newItems) }));
@@ -346,25 +402,6 @@ export default function QuoteFormPage() {
   const handleSelectChange = (name, value) => {
     const v = String(value);
     setCurrentQuote((prev) => ({ ...prev, [name]: v }));
-
-    if (name === "client_id") {
-      const selected =
-        safeClients.find((c) => String(c.id) === v) ||
-        (externalClientOption && String(externalClientOption.id) === v ? externalClientOption : null);
-
-      if (selected) {
-        try {
-          localStorage.setItem("cotacao_cliente", JSON.stringify(selected));
-        } catch {}
-        setCurrentQuote((prev) => ({
-          ...prev,
-          client_id: v,
-          contactPerson: prev.contactPerson?.trim()
-            ? prev.contactPerson
-            : String(selected.name || selected.nome_razao || ""),
-        }));
-      }
-    }
   };
 
   const handleSelectCompany = (companyId) => {
@@ -373,19 +410,16 @@ export default function QuoteFormPage() {
     setCurrentQuote((prev) => ({ ...prev, company_id: String(c.id) }));
   };
 
-  const handleSelectClient = () => {
-    const returnTo = `${location.pathname}${location.search || ""}`;
-    navigate(`/clientes?returnTo=${encodeURIComponent(returnTo)}`);
-  };
-
   const productItems = useMemo(
     () => (currentQuote.items || []).filter((i) => i.item_type === "PRODUTO"),
     [currentQuote.items]
   );
+
   const serviceItems = useMemo(
     () => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO"),
     [currentQuote.items]
   );
+
   const scmServiceItems = useMemo(
     () => (currentQuote.items || []).filter((i) => i.item_type === "SERVICO_SCM"),
     [currentQuote.items]
@@ -396,18 +430,13 @@ export default function QuoteFormPage() {
     const subtotalProdutos = productItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
     const subtotalServicos = serviceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
     const subtotalScm = scmServiceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
-    const totalTributos = items.reduce((acc, item) => acc + n(item?.taxes?.total_tributos_item || 0), 0);
+    const totalTributos = items.reduce(
+      (acc, item) => acc + n(item?.taxes?.total_tributos_item || 0),
+      0
+    );
     const totalGeral = subtotalProdutos + subtotalServicos + subtotalScm;
     return { subtotalProdutos, subtotalServicos, subtotalScm, totalTributos, totalGeral };
   }, [productItems, serviceItems, scmServiceItems, currentQuote.items]);
-
-  const clientsSelectList = useMemo(() => {
-    const list = [...safeClients];
-    if (externalClientOption && !list.some((c) => String(c.id) === String(externalClientOption.id))) {
-      list.unshift(externalClientOption);
-    }
-    return list;
-  }, [safeClients, externalClientOption]);
 
   const sellersSelectList = useMemo(() => {
     if (Array.isArray(bffSellers) && bffSellers.length > 0) return bffSellers;
@@ -423,6 +452,7 @@ export default function QuoteFormPage() {
     const client =
       safeClients.find((c) => String(c.id) === String(currentQuote.client_id)) ||
       externalClientOption ||
+      selectedClient ||
       null;
 
     const autor = safeUsers.find((u) => String(u.id) === String(currentQuote.user_id));
@@ -455,6 +485,7 @@ export default function QuoteFormPage() {
     selectedCompany,
     safeClients,
     externalClientOption,
+    selectedClient,
     safeAddresses,
     safeUsers,
     bffSellers,
@@ -477,7 +508,10 @@ export default function QuoteFormPage() {
     const action = meta?.action || "download";
     try {
       if (action === "print") {
-        const result = await generateQuotePDF({ ...pdfPreviewData, template }, { download: false });
+        const result = await generateQuotePDF(
+          { ...pdfPreviewData, template },
+          { download: false }
+        );
         const url = resultToUrl(result);
         if (url) {
           openAndPrintUrl(url);
@@ -504,7 +538,6 @@ export default function QuoteFormPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // ✅ id OU sub
     const fallbackLoggedId = String(bffUser?.id || bffUser?.sub || "").trim();
 
     const fixedCompanyId = String(currentQuote.company_id || DEFAULT_COMPANY_ID);
@@ -530,12 +563,26 @@ export default function QuoteFormPage() {
     const clientName =
       safeClients.find((cli) => String(cli.id) === fixedClientId)?.name ||
       safeClients.find((cli) => String(cli.id) === fixedClientId)?.nome_razao ||
-      safeText(externalClientOption?.name || externalClientOption?.nome_razao || "");
+      safeText(
+        selectedClient?.name ||
+          selectedClient?.nome_razao ||
+          externalClientOption?.name ||
+          externalClientOption?.nome_razao ||
+          ""
+      );
 
     const clientDoc =
       safeClients.find((cli) => String(cli.id) === fixedClientId)?.cpf_cnpj ||
       safeClients.find((cli) => String(cli.id) === fixedClientId)?.txIdFormated ||
-      safeText(externalClientOption?.cpf_cnpj || externalClientOption?.txIdFormated || externalClientOption?.txId || "");
+      safeText(
+        selectedClient?.cpf_cnpj ||
+          selectedClient?.txIdFormated ||
+          selectedClient?.txId ||
+          externalClientOption?.cpf_cnpj ||
+          externalClientOption?.txIdFormated ||
+          externalClientOption?.txId ||
+          ""
+      );
 
     const quotePayload = {
       id: currentQuote.id || undefined,
@@ -545,7 +592,6 @@ export default function QuoteFormPage() {
       created_at: currentQuote.created_at || Date.now(),
       updated_at: Date.now(),
 
-      // ✅ vínculo correto
       user_id: safeText(currentQuote.user_id || fallbackLoggedId),
       seller_id: fixedSellerId,
 
@@ -583,8 +629,6 @@ export default function QuoteFormPage() {
       })),
     };
 
-    console.log("[QuoteFormPage] salvando quotePayload:", quotePayload);
-
     try {
       let saved;
 
@@ -621,17 +665,30 @@ export default function QuoteFormPage() {
 
   return (
     <div className="space-y-6">
-      <motion.form onSubmit={handleSubmit} className="space-y-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <motion.form
+        onSubmit={handleSubmit}
+        className="space-y-6"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">{id ? "Editar Cotação" : "Criar Nova Cotação"}</h1>
+            <h1 className="text-2xl font-bold text-white">
+              {id ? "Editar Cotação" : "Criar Nova Cotação"}
+            </h1>
             <p className="text-white/60">
               Proposta Nº: {currentQuote.proposal_number} | Revisão: {currentQuote.revision}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" className="btn-secondary" onClick={handleOpenPreview} disabled={!canOpenPdf}>
+            <Button
+              type="button"
+              variant="outline"
+              className="btn-secondary"
+              onClick={handleOpenPreview}
+              disabled={!canOpenPdf}
+            >
               <FileDown className="w-4 h-4 mr-2" />
               Gerar PDF
             </Button>
@@ -649,12 +706,19 @@ export default function QuoteFormPage() {
             <Select value={String(currentQuote.company_id || "")} onValueChange={handleSelectCompany}>
               <SelectTrigger className="input-field">
                 <Building className="w-4 h-4 mr-2 opacity-60" />
-                <SelectValue placeholder="Selecione a empresa" />
+                <SelectValue>
+                  {(() => {
+                    const empresa = COMPANY_OPTIONS.find(
+                      (c) => String(c.id) === String(currentQuote.company_id || "")
+                    );
+                    return empresa ? `${empresa.name} (${empresa.cnpj})`.toUpperCase() : "SELECIONE A EMPRESA";
+                  })()}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent className="glass-effect">
                 {COMPANY_OPTIONS.map((c) => (
                   <SelectItem key={c.id} value={String(c.id)}>
-                    {c.name} ({c.cnpj})
+                    {`${c.name} (${c.cnpj})`.toUpperCase()}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -662,28 +726,13 @@ export default function QuoteFormPage() {
           </div>
 
           <div>
-            <Label htmlFor="client_id">Cliente</Label>
-            <div className="flex items-center gap-2">
-              <Select value={String(currentQuote.client_id || "")} onValueChange={(v) => handleSelectChange("client_id", v)}>
-                <SelectTrigger className="input-field w-full">
-                  <User className="w-4 h-4 mr-2 opacity-60" />
-                  <SelectValue placeholder="Selecione o cliente" />
-                </SelectTrigger>
-
-                <SelectContent className="glass-effect">
-                  {clientsSelectList.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {formatClientLabel(c)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Button type="button" variant="secondary" className="btn-secondary flex-shrink-0" onClick={handleSelectClient}>
-                <Users2 className="w-4 h-4 mr-2" />
-                Selecionar
-              </Button>
-            </div>
+            <Label>Cliente</Label>
+            <ClientSearchSelectRemote
+              value={selectedClient}
+              onChange={(client) => applySelectedClient(client)}
+              placeholder="Pesquisar cliente"
+              className="w-full"
+            />
           </div>
 
           <div>
@@ -755,23 +804,47 @@ export default function QuoteFormPage() {
           <div className="floating-card p-6">
             <QuoteTotals totais={totais} />
           </div>
+
           <div className="floating-card p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="validity_date">Validade (dias)</Label>
-                <Input name="validity_date" value={currentQuote.validity_date} onChange={handleInputChange} className="input-field" />
+                <Input
+                  name="validity_date"
+                  value={currentQuote.validity_date}
+                  onChange={handleInputChange}
+                  className="input-field"
+                />
               </div>
+
               <div>
                 <Label htmlFor="payment_terms">Condições de pagamento</Label>
-                <Input name="payment_terms" value={currentQuote.payment_terms} onChange={handleInputChange} className="input-field" />
+                <Input
+                  name="payment_terms"
+                  value={currentQuote.payment_terms}
+                  onChange={handleInputChange}
+                  className="input-field"
+                />
               </div>
+
               <div>
                 <Label htmlFor="freight_type">Tipo de frete</Label>
-                <Input name="freight_type" value={currentQuote.freight_type} onChange={handleInputChange} className="input-field" />
+                <Input
+                  name="freight_type"
+                  value={currentQuote.freight_type}
+                  onChange={handleInputChange}
+                  className="input-field"
+                />
               </div>
+
               <div>
                 <Label htmlFor="delivery_location">Local de entrega</Label>
-                <Input name="delivery_location" value={currentQuote.delivery_location} onChange={handleInputChange} className="input-field" />
+                <Input
+                  name="delivery_location"
+                  value={currentQuote.delivery_location}
+                  onChange={handleInputChange}
+                  className="input-field"
+                />
               </div>
             </div>
           </div>

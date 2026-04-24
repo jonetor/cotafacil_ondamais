@@ -29,14 +29,46 @@ function getApiBase() {
 
 function getStoredToken() {
   try {
-    return (
-      localStorage.getItem("bff_token") ||
-      localStorage.getItem("token") ||
-      ""
-    );
+    return localStorage.getItem("bff_token") || localStorage.getItem("token") || "";
   } catch {
     return "";
   }
+}
+
+function sortClients(list) {
+  return [...normalizeArray(list)].sort((a, b) => {
+    const na = String(
+      a?.name ||
+        a?.nome ||
+        a?.nome_razao ||
+        a?.nome_fantasia ||
+        a?.razao_social ||
+        ""
+    ).toLowerCase();
+
+    const nb = String(
+      b?.name ||
+        b?.nome ||
+        b?.nome_razao ||
+        b?.nome_fantasia ||
+        b?.razao_social ||
+        ""
+    ).toLowerCase();
+
+    return na.localeCompare(nb, "pt-BR");
+  });
+}
+
+function dedupeById(list) {
+  const map = new Map();
+
+  for (const item of normalizeArray(list)) {
+    const id = String(item?.id ?? "");
+    if (!id) continue;
+    if (!map.has(id)) map.set(id, item);
+  }
+
+  return Array.from(map.values());
 }
 
 export function SupabaseDataProvider({ children }) {
@@ -80,7 +112,6 @@ export function SupabaseDataProvider({ children }) {
     [apiBase]
   );
 
-  // ===== LOADERS =====
   const fetchSellers = useCallback(async () => {
     if (!user) return;
     try {
@@ -105,20 +136,51 @@ export function SupabaseDataProvider({ children }) {
     }
   }, [user, bffFetch]);
 
-  const fetchClients = useCallback(async () => {
-    if (!user) return;
-    try {
-      const r = await plainFetch("/api/voalle/clientes-db", { method: "GET" });
-      if (r?.items) setClients(normalizeArray(r.items));
-      else setClients(normalizeArray(r));
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao buscar clientes",
-        description: e?.message || String(e),
-      });
+  const fetchAllClientsPaged = useCallback(async () => {
+    const pageSize = 200;
+    let page = 1;
+    let all = [];
+    let safety = 0;
+
+    while (true) {
+      const query = `/api/voalle/clientes-db?page=${page}&limit=${pageSize}`;
+      const r = await plainFetch(query, { method: "GET" });
+
+      const batch = normalizeArray(r?.items ?? r?.data ?? r);
+      if (batch.length === 0) break;
+
+      all = all.concat(batch);
+
+      if (batch.length < pageSize) break;
+
+      page += 1;
+      safety += 1;
+
+      if (safety > 500) {
+        console.warn("[fetchAllClientsPaged] limite de segurança atingido");
+        break;
+      }
     }
-  }, [user, plainFetch, toast]);
+
+    return all;
+  }, [plainFetch]);
+
+      const fetchClients = useCallback(async () => {
+      if (!user) return;
+
+      try {
+        const r = await plainFetch("/api/voalle/clientes-db?limit=50", { method: "GET" });
+        const list = normalizeArray(r?.items ?? r);
+        setClients(list);
+      } catch (e) {
+        toast({
+          variant: "destructive",
+          title: "Erro ao buscar clientes",
+          description: e?.message || String(e),
+        });
+        setClients([]);
+      }
+    }, [user, plainFetch, toast]);
 
   const fetchQuotes = useCallback(async () => {
     if (!user) return;
@@ -149,7 +211,10 @@ export function SupabaseDataProvider({ children }) {
     await fetchQuotes();
   }, [fetchQuotes]);
 
-  // ===== MUTATIONS =====
+  const reloadClients = useCallback(async () => {
+    await fetchClients();
+  }, [fetchClients]);
+
   const addUser = useCallback(
     async (payload) => {
       const { name, email, password, role } = payload || {};
@@ -207,7 +272,6 @@ export function SupabaseDataProvider({ children }) {
     [plainFetch, fetchQuotes]
   );
 
-  // bootstrap
   useEffect(() => {
     let cancelled = false;
 
@@ -251,7 +315,9 @@ export function SupabaseDataProvider({ children }) {
       users,
 
       reloadQuotes,
+      reloadClients,
       fetchQuotes,
+      fetchClients,
 
       addUser,
       deleteUser,
@@ -279,7 +345,9 @@ export function SupabaseDataProvider({ children }) {
       addresses,
       users,
       reloadQuotes,
+      reloadClients,
       fetchQuotes,
+      fetchClients,
       addUser,
       deleteUser,
       addQuote,
