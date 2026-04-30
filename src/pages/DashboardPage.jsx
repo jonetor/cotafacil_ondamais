@@ -45,7 +45,7 @@ const MetricCard = ({ icon: Icon, title, value, color, delay }) => (
 
 const DashboardPage = () => {
   const { quotes, clients, sellers } = useData();
-  const { user } = useAuth();
+  const { user, bffFetch } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -150,7 +150,7 @@ const DashboardPage = () => {
     return !approved;
   };
 
-  const handleEditQuote = (quote) => {
+  const handleEditQuote = async (quote) => {
     if (!canEditQuote(quote)) {
       toast({
         variant: 'destructive',
@@ -160,9 +160,16 @@ const DashboardPage = () => {
       return;
     }
 
-    navigate(`/cotacoes/editar/${quote.id}`, {
-      state: { quote },
-    });
+    try {
+      const full = await bffFetch(`/api/quotes/${quote.id}`, { method: 'GET' });
+      navigate(`/cotacoes/editar/${quote.id}`, { state: { quote: full } });
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao abrir edição',
+        description: e?.message || String(e),
+      });
+    }
   };
 
   const handleExportExcel = () => {
