@@ -7,7 +7,14 @@ import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
-import { Plus, Edit, Trash2, Search, FileDown, CheckCircle2 } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Search,
+  FileDown,
+  CheckCircle2,
+} from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,7 +78,17 @@ function getInfoText(q) {
 }
 
 export default function Quotes() {
-  const { quotes, clients, companies, users, addresses, sellers, deleteQuote, reloadQuotes } = useData();
+  const {
+    quotes,
+    clients,
+    companies,
+    users,
+    addresses,
+    sellers,
+    deleteQuote,
+    reloadQuotes,
+  } = useData();
+
   const { bffFetch } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -113,9 +130,16 @@ export default function Quotes() {
   const quotesWithClientNames = useMemo(() => {
     return safeQuotes
       .map((quote) => {
-        const directName = String(quote.client_name || quote.clientName || "").trim();
+        const directName = String(
+          quote.client_name || quote.clientName || ""
+        ).trim();
+
         if (directName) {
-          return { ...quote, clientName: directName, __time: safeTime(quote.created_at) };
+          return {
+            ...quote,
+            clientName: directName,
+            __time: safeTime(quote.created_at),
+          };
         }
 
         const qid = String(quote.client_id || "");
@@ -128,7 +152,9 @@ export default function Quotes() {
 
         return {
           ...quote,
-          clientName: client ? (client.name || client.nome_razao || client.nome_fantasia) : "Cliente",
+          clientName: client
+            ? client.name || client.nome_razao || client.nome_fantasia
+            : "Cliente",
           __time: safeTime(quote.created_at),
         };
       })
@@ -142,8 +168,12 @@ export default function Quotes() {
     return quotesWithClientNames.filter((q) => {
       const info = getInfoText(q).toLowerCase();
       return (
-        String(q.proposal_number || q.proposta_numero || "").toLowerCase().includes(s) ||
-        String(q.clientName || "").toLowerCase().includes(s) ||
+        String(q.proposal_number || q.proposta_numero || "")
+          .toLowerCase()
+          .includes(s) ||
+        String(q.clientName || "")
+          .toLowerCase()
+          .includes(s) ||
         info.includes(s)
       );
     });
@@ -164,13 +194,22 @@ export default function Quotes() {
 
   const handleDeleteQuote = async (id) => {
     try {
-      setLocalQuotes((prev) => prev.filter((q) => String(q.id) !== String(id)));
+      setLocalQuotes((prev) =>
+        prev.filter((q) => String(q.id) !== String(id))
+      );
       await deleteQuote(id);
-      toast({ title: "Cotação excluída", description: "Registro removido com sucesso." });
+      toast({
+        title: "Cotação excluída",
+        description: "Registro removido com sucesso.",
+      });
       if (typeof reloadQuotes === "function") await reloadQuotes();
     } catch (e) {
       if (typeof reloadQuotes === "function") await reloadQuotes();
-      toast({ variant: "destructive", title: "Erro ao excluir", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao excluir",
+        description: e?.message || String(e),
+      });
     }
   };
 
@@ -194,7 +233,11 @@ export default function Quotes() {
       if (typeof reloadQuotes === "function") await reloadQuotes();
     } catch (e) {
       if (typeof reloadQuotes === "function") await reloadQuotes();
-      toast({ variant: "destructive", title: "Erro ao aprovar", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao aprovar",
+        description: e?.message || String(e),
+      });
     }
   };
 
@@ -203,7 +246,11 @@ export default function Quotes() {
       const full = await bffFetch(`/api/quotes/${quote.id}`, { method: "GET" });
       navigate(`/cotacoes/editar/${quote.id}`, { state: { quote: full } });
     } catch (e) {
-      toast({ variant: "destructive", title: "Erro ao abrir edição", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao abrir edição",
+        description: e?.message || String(e),
+      });
     }
   };
 
@@ -218,14 +265,25 @@ export default function Quotes() {
           ...it,
           quantity: Number(it.quantity || 0),
           unit_price: Number(it.unit_price || 0),
-          total_price: Number(it.total_price || (Number(it.quantity || 0) * Number(it.unit_price || 0))),
+          total_price: Number(
+            it.total_price || Number(it.quantity || 0) * Number(it.unit_price || 0)
+          ),
         })),
       };
 
-      let company = safeCompanies.find((c) => String(c.id) === String(normalizedQuote.company_id)) || null;
+      let company =
+        safeCompanies.find(
+          (c) => String(c.id) === String(normalizedQuote.company_id)
+        ) || null;
+
       if (!company) {
-        const companyName = String(normalizedQuote.company_name || "Fibra Onda+ LTDA");
-        const companyDoc = String(normalizedQuote.company_document || "14.429.925/0001-67");
+        const companyName = String(
+          normalizedQuote.company_name || "FIBRA ONDA MAIS LTDA"
+        );
+        const companyDoc = String(
+          normalizedQuote.company_document || "14.429.925/0001-67"
+        );
+
         company = {
           id: String(normalizedQuote.company_id || "static"),
           name: companyName,
@@ -245,8 +303,13 @@ export default function Quotes() {
         null;
 
       if (!client) {
-        const clientName = String(normalizedQuote.client_name || normalizedQuote.clientName || "Cliente");
-        const clientDoc = String(normalizedQuote.client_document || normalizedQuote.clientDoc || "");
+        const clientName = String(
+          normalizedQuote.client_name || normalizedQuote.clientName || "Cliente"
+        );
+        const clientDoc = String(
+          normalizedQuote.client_document || normalizedQuote.clientDoc || ""
+        );
+
         client = {
           id: qClientId || qClientIdRaw || "client",
           name: clientName,
@@ -255,15 +318,32 @@ export default function Quotes() {
         };
       }
 
-      const autor = safeUsers.find((u) => String(u.id) === String(normalizedQuote.user_id)) || null;
-      const vendedor = safeSellers.find((s) => String(s.id) === String(normalizedQuote.seller_id)) || null;
+      const autor =
+        safeUsers.find(
+          (u) => String(u.id) === String(normalizedQuote.user_id)
+        ) || null;
+
+      const vendedor =
+        safeSellers.find(
+          (s) => String(s.id) === String(normalizedQuote.seller_id)
+        ) || null;
 
       const companyWithAddr = company
-        ? { ...company, addresses: safeAddresses.filter((a) => String(a.company_id) === String(company.id)) }
+        ? {
+            ...company,
+            addresses: safeAddresses.filter(
+              (a) => String(a.company_id) === String(company.id)
+            ),
+          }
         : null;
 
       const clientWithAddr = client
-        ? { ...client, addresses: safeAddresses.filter((a) => String(a.client_id) === String(client.id)) }
+        ? {
+            ...client,
+            addresses: safeAddresses.filter(
+              (a) => String(a.client_id) === String(client.id)
+            ),
+          }
         : null;
 
       setPreviewData({
@@ -276,14 +356,24 @@ export default function Quotes() {
 
       setPreviewOpen(true);
     } catch (e) {
-      toast({ variant: "destructive", title: "Erro ao gerar PDF", description: e?.message || String(e) });
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar PDF",
+        description: e?.message || String(e),
+      });
     }
   };
 
   const handleConfirmPdf = async (template, meta) => {
     const action = meta?.action || "download";
+    const documentType = meta?.documentType || "orcamento";
+
     if (!previewData?.company || !previewData?.client) {
-      toast({ variant: "destructive", title: "Dados incompletos", description: "Não foi possível montar os dados do PDF." });
+      toast({
+        variant: "destructive",
+        title: "Dados incompletos",
+        description: "Não foi possível montar os dados do PDF.",
+      });
       return;
     }
 
@@ -291,14 +381,27 @@ export default function Quotes() {
       if (!result) return null;
       if (typeof result === "string") return result;
       if (result?.url && typeof result.url === "string") return result.url;
-      const blob = result?.blob instanceof Blob ? result.blob : result instanceof Blob ? result : null;
+      const blob =
+        result?.blob instanceof Blob
+          ? result.blob
+          : result instanceof Blob
+          ? result
+          : null;
       if (blob) return URL.createObjectURL(blob);
       return null;
     };
 
     try {
       if (action === "print") {
-        const result = await generateQuotePDF({ ...previewData, template }, { download: false });
+        const result = await generateQuotePDF(
+          {
+            ...previewData,
+            template,
+            documentType,
+          },
+          { download: false }
+        );
+
         const url = resultToUrl(result);
 
         if (url) {
@@ -306,16 +409,25 @@ export default function Quotes() {
           return;
         }
 
-        await generateQuotePDF({ ...previewData, template });
+        await generateQuotePDF({
+          ...previewData,
+          template,
+          documentType,
+        });
 
         toast({
           title: "PDF gerado",
-          description: "O gerador baixou o PDF, mas não retornou URL/Blob para impressão automática.",
+          description:
+            "O gerador baixou o PDF, mas não retornou URL/Blob para impressão automática.",
         });
         return;
       }
 
-      await generateQuotePDF({ ...previewData, template });
+      await generateQuotePDF({
+        ...previewData,
+        template,
+        documentType,
+      });
     } catch (e) {
       toast({
         variant: "destructive",
@@ -332,14 +444,22 @@ export default function Quotes() {
       </Helmet>
 
       <div className="space-y-6">
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-100">Cotações</h1>
-              <p className="text-slate-400 mt-1">Gerencie suas propostas e orçamentos.</p>
+              <p className="text-slate-400 mt-1">
+                Gerencie suas propostas e orçamentos.
+              </p>
             </div>
 
-            <Button className="btn-primary" onClick={() => navigate("/cotacoes/novo")}>
+            <Button
+              className="btn-primary"
+              onClick={() => navigate("/cotacoes/novo")}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Nova Cotação
             </Button>
@@ -374,28 +494,54 @@ export default function Quotes() {
 
             <tbody>
               {filteredQuotes.map((quote) => (
-                <tr key={quote.id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3 px-2 text-slate-100 font-semibold">{quote.proposal_number || "-"}</td>
-                  <td className="py-3 px-2 text-slate-200">{quote.clientName}</td>
+                <tr
+                  key={quote.id}
+                  className="border-b border-white/5 hover:bg-white/5"
+                >
+                  <td className="py-3 px-2 text-slate-100 font-semibold">
+                    {quote.proposal_number || "-"}
+                  </td>
+
+                  <td className="py-3 px-2 text-slate-200">
+                    {quote.clientName}
+                  </td>
 
                   <td className="py-3 px-2 text-slate-300">
-                    <div className="max-w-[520px] whitespace-nowrap overflow-hidden text-ellipsis" title={getInfoText(quote)}>
+                    <div
+                      className="max-w-[520px] whitespace-nowrap overflow-hidden text-ellipsis"
+                      title={getInfoText(quote)}
+                    >
                       {getInfoText(quote) || "-"}
                     </div>
                   </td>
 
-                  <td className="py-3 px-2 text-slate-300">{safeFormatDate(quote.created_at)}</td>
-                  <td className="py-3 px-2 text-right text-slate-200">{formatCurrency(quote.total_value || 0)}</td>
+                  <td className="py-3 px-2 text-slate-300">
+                    {safeFormatDate(quote.created_at)}
+                  </td>
+
+                  <td className="py-3 px-2 text-right text-slate-200">
+                    {formatCurrency(quote.total_value || 0)}
+                  </td>
 
                   <td className="py-3 px-2">
-                    <span className={`px-2 py-1 rounded-md text-xs ${getStatusClass(quote.status)}`}>
+                    <span
+                      className={`px-2 py-1 rounded-md text-xs ${getStatusClass(
+                        quote.status
+                      )}`}
+                    >
                       {quote.status || "pending"}
                     </span>
                   </td>
 
                   <td className="py-3 px-2">
                     <div className="flex justify-end gap-2">
-                      <Button type="button" variant="secondary" className="btn-secondary" onClick={() => openPDFPreview(quote)} title="Gerar/Imprimir PDF">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="btn-secondary"
+                        onClick={() => openPDFPreview(quote)}
+                        title="Gerar/Imprimir PDF"
+                      >
                         <FileDown className="w-4 h-4" />
                       </Button>
 
@@ -405,33 +551,55 @@ export default function Quotes() {
                         className="btn-secondary"
                         onClick={() => handleApproveQuote(quote)}
                         title="Aprovar cotação"
-                        disabled={String(quote.status || "").toLowerCase() === "approved"}
+                        disabled={
+                          String(quote.status || "").toLowerCase() === "approved"
+                        }
                       >
                         <CheckCircle2 className="w-4 h-4 text-green-300" />
                       </Button>
 
-                      <Button type="button" variant="secondary" className="btn-secondary" onClick={() => handleEditQuote(quote)} title="Editar">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="btn-secondary"
+                        onClick={() => handleEditQuote(quote)}
+                        title="Editar"
+                      >
                         <Edit className="w-4 h-4" />
                       </Button>
 
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button type="button" variant="secondary" className="btn-secondary" title="Excluir">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="btn-secondary"
+                            title="Excluir"
+                          >
                             <Trash2 className="w-4 h-4 text-red-300" />
                           </Button>
                         </AlertDialogTrigger>
 
                         <AlertDialogContent className="glass-effect border-white/20 text-white">
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+                            <AlertDialogTitle>
+                              Confirmar Exclusão
+                            </AlertDialogTitle>
                             <AlertDialogDescription className="text-white/70">
-                              Tem certeza que deseja excluir a cotação Nº <b>{quote.proposal_number || "-"}</b>? Esta ação não pode ser desfeita.
+                              Tem certeza que deseja excluir a cotação Nº{" "}
+                              <b>{quote.proposal_number || "-"}</b>? Esta ação
+                              não pode ser desfeita.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
 
                           <AlertDialogFooter>
-                            <AlertDialogCancel className="btn-secondary">Cancelar</AlertDialogCancel>
-                            <AlertDialogAction className="bg-red-500 hover:bg-red-600" onClick={() => handleDeleteQuote(quote.id)}>
+                            <AlertDialogCancel className="btn-secondary">
+                              Cancelar
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-red-500 hover:bg-red-600"
+                              onClick={() => handleDeleteQuote(quote.id)}
+                            >
                               Excluir
                             </AlertDialogAction>
                           </AlertDialogFooter>
@@ -444,7 +612,10 @@ export default function Quotes() {
 
               {filteredQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-500">
+                  <td
+                    colSpan={7}
+                    className="py-10 text-center text-slate-500"
+                  >
                     Nenhuma cotação encontrada.
                   </td>
                 </tr>

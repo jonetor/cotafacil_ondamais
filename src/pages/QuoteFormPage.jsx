@@ -3,7 +3,13 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useData } from "@/contexts/SupabaseDataContext";
 import { useToast } from "@/components/ui/use-toast";
 import { Save, Building, FileDown, UserSquare } from "lucide-react";
@@ -58,7 +64,9 @@ const DEFAULT_COMPANY_ID = DEFAULT_COMPANY.id;
 
 const getNextProposalNumber = (quotes) => {
   if (!Array.isArray(quotes) || quotes.length === 0) return 1;
-  const maxNumber = Math.max(...quotes.map((q) => parseInt(q?.proposal_number, 10) || 0));
+  const maxNumber = Math.max(
+    ...quotes.map((q) => parseInt(q?.proposal_number, 10) || 0)
+  );
   return maxNumber + 1;
 };
 
@@ -76,7 +84,9 @@ function normalizeItems(items) {
   return list.map((it) => {
     const quantity = n(it.quantity);
     const unit_price = n(it.unit_price);
-    const item_type = String(it.item_type || it.type || it.itemType || "PRODUTO").toUpperCase();
+    const item_type = String(
+      it.item_type || it.type || it.itemType || "PRODUTO"
+    ).toUpperCase();
     const icms = n(it.icms ?? it?.taxes?.icms);
     const issqn = n(it.issqn ?? it?.taxes?.issqn);
     const total_price = n(it.total_price) || quantity * unit_price;
@@ -115,7 +125,12 @@ function getClientName(client) {
   );
 }
 
-function resolveClientFromSources({ rawClientId, rawClientName, rawClientDoc, safeClients }) {
+function resolveClientFromSources({
+  rawClientId,
+  rawClientName,
+  rawClientDoc,
+  safeClients,
+}) {
   const id = String(rawClientId || "").trim();
   const docDigits = onlyDigits(rawClientDoc || "");
   const nameNorm = String(rawClientName || "").trim().toLowerCase();
@@ -159,7 +174,9 @@ export default function QuoteFormPage() {
   const safeQuotes = Array.isArray(quotes) ? quotes : [];
   const safeUsers = Array.isArray(users) ? users : [];
   const safeAddresses = Array.isArray(addresses) ? addresses : [];
-  const safeSupabaseSellers = Array.isArray(supabaseSellers) ? supabaseSellers : [];
+  const safeSupabaseSellers = Array.isArray(supabaseSellers)
+    ? supabaseSellers
+    : [];
 
   const [bffSellers, setBffSellers] = useState([]);
   const [loadingSellers, setLoadingSellers] = useState(false);
@@ -167,7 +184,9 @@ export default function QuoteFormPage() {
   const [selectedClient, setSelectedClient] = useState(null);
 
   const loggedUserId = String(bffUser?.id || bffUser?.sub || "").trim();
-  const loggedUserRole = String(bffUser?.role || bffUser?.user_metadata?.role || "").toLowerCase();
+  const loggedUserRole = String(
+    bffUser?.role || bffUser?.user_metadata?.role || ""
+  ).toLowerCase();
   const isSeller = loggedUserRole === "seller";
 
   const [currentQuote, setCurrentQuote] = useState({
@@ -188,6 +207,17 @@ export default function QuoteFormPage() {
     revision: 0,
     created_at: new Date().toISOString(),
     user_id: "",
+
+    forma_pagamento: "",
+    validade_proposta: "",
+    observacoes: "",
+    objeto: "",
+    missao: "",
+    escopo_tecnico: "",
+    segmentacao: "",
+    investimento_texto: "",
+    condicoes_comerciais: "",
+    assinatura_tecnica: "",
   });
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -214,7 +244,8 @@ export default function QuoteFormPage() {
     if (!result) return null;
     if (typeof result === "string") return result;
     if (result?.url && typeof result.url === "string") return result.url;
-    const blob = result?.blob instanceof Blob ? result.blob : result instanceof Blob ? result : null;
+    const blob =
+      result?.blob instanceof Blob ? result.blob : result instanceof Blob ? result : null;
     if (blob) return URL.createObjectURL(blob);
     return null;
   };
@@ -260,7 +291,9 @@ export default function QuoteFormPage() {
         setCurrentQuote((prev) => ({
           ...prev,
           client_id: String(matchInternal.id),
-          contactPerson: prev.contactPerson?.trim() ? prev.contactPerson : getClientName(matchInternal),
+          contactPerson: prev.contactPerson?.trim()
+            ? prev.contactPerson
+            : getClientName(matchInternal),
         }));
         return;
       }
@@ -269,7 +302,12 @@ export default function QuoteFormPage() {
         id: rawId ? `voalle:${rawId}` : `voalle:${docDigits || uid()}`,
         name: nome,
         nome_razao: nome,
-        cpf_cnpj: client?.cpf_cnpj || client?.txIdFormated || client?.txId || client?.document || "",
+        cpf_cnpj:
+          client?.cpf_cnpj ||
+          client?.txIdFormated ||
+          client?.txId ||
+          client?.document ||
+          "",
         city: client?.city || "",
         state: client?.state || "",
         email: client?.email || "",
@@ -343,12 +381,25 @@ export default function QuoteFormPage() {
         freight_type: safeText(sourceQuote.freight_type) || "CIF",
         delivery_location: safeText(sourceQuote.delivery_location),
         description: safeText(sourceQuote.description || sourceQuote.notes || ""),
-        additional_info: safeText(sourceQuote.additional_info || sourceQuote.additionalInfo || ""),
+        additional_info: safeText(
+          sourceQuote.additional_info || sourceQuote.additionalInfo || ""
+        ),
         contactPerson: safeText(
           sourceQuote.contact_person ||
             sourceQuote.contactPerson ||
             prev.contactPerson
         ),
+
+        forma_pagamento: safeText(sourceQuote.forma_pagamento),
+        validade_proposta: safeText(sourceQuote.validade_proposta),
+        observacoes: safeText(sourceQuote.observacoes),
+        objeto: safeText(sourceQuote.objeto),
+        missao: safeText(sourceQuote.missao),
+        escopo_tecnico: safeText(sourceQuote.escopo_tecnico),
+        segmentacao: safeText(sourceQuote.segmentacao),
+        investimento_texto: safeText(sourceQuote.investimento_texto),
+        condicoes_comerciais: safeText(sourceQuote.condicoes_comerciais),
+        assinatura_tecnica: safeText(sourceQuote.assinatura_tecnica),
       }));
     }
 
@@ -427,15 +478,30 @@ export default function QuoteFormPage() {
 
   const totais = useMemo(() => {
     const items = Array.isArray(currentQuote.items) ? currentQuote.items : [];
-    const subtotalProdutos = productItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
-    const subtotalServicos = serviceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
-    const subtotalScm = scmServiceItems.reduce((acc, item) => acc + (item.total_price || 0), 0);
+    const subtotalProdutos = productItems.reduce(
+      (acc, item) => acc + (item.total_price || 0),
+      0
+    );
+    const subtotalServicos = serviceItems.reduce(
+      (acc, item) => acc + (item.total_price || 0),
+      0
+    );
+    const subtotalScm = scmServiceItems.reduce(
+      (acc, item) => acc + (item.total_price || 0),
+      0
+    );
     const totalTributos = items.reduce(
       (acc, item) => acc + n(item?.taxes?.total_tributos_item || 0),
       0
     );
     const totalGeral = subtotalProdutos + subtotalServicos + subtotalScm;
-    return { subtotalProdutos, subtotalServicos, subtotalScm, totalTributos, totalGeral };
+    return {
+      subtotalProdutos,
+      subtotalServicos,
+      subtotalScm,
+      totalTributos,
+      totalGeral,
+    };
   }, [productItems, serviceItems, scmServiceItems, currentQuote.items]);
 
   const sellersSelectList = useMemo(() => {
@@ -458,7 +524,9 @@ export default function QuoteFormPage() {
     const autor = safeUsers.find((u) => String(u.id) === String(currentQuote.user_id));
     const vendedor =
       (bffSellers || []).find((u) => String(u.id) === String(currentQuote.seller_id)) ||
-      (safeSupabaseSellers || []).find((s) => String(s.id) === String(currentQuote.seller_id));
+      (safeSupabaseSellers || []).find(
+        (s) => String(s.id) === String(currentQuote.seller_id)
+      );
 
     return {
       quote: {
@@ -474,7 +542,10 @@ export default function QuoteFormPage() {
       },
       company: { ...selectedCompany },
       client: client
-        ? { ...client, addresses: safeAddresses.filter((addr) => addr.client_id === client.id) }
+        ? {
+            ...client,
+            addresses: safeAddresses.filter((addr) => addr.client_id === client.id),
+          }
         : null,
       vendedor,
       autor,
@@ -506,10 +577,12 @@ export default function QuoteFormPage() {
 
   const handlePdfConfirm = async (template, meta) => {
     const action = meta?.action || "download";
+    const documentType = meta?.documentType || "orcamento";
+
     try {
       if (action === "print") {
         const result = await generateQuotePDF(
-          { ...pdfPreviewData, template },
+          { ...pdfPreviewData, template, documentType },
           { download: false }
         );
         const url = resultToUrl(result);
@@ -525,7 +598,11 @@ export default function QuoteFormPage() {
         return;
       }
 
-      await generateQuotePDF({ ...pdfPreviewData, template });
+      await generateQuotePDF({
+        ...pdfPreviewData,
+        template,
+        documentType,
+      });
     } catch (e) {
       toast({
         variant: "destructive",
@@ -610,6 +687,17 @@ export default function QuoteFormPage() {
       delivery_location: safeText(currentQuote.delivery_location),
       notes: safeText(currentQuote.description),
       additional_info: safeText(currentQuote.additional_info),
+
+      forma_pagamento: safeText(currentQuote.forma_pagamento),
+      validade_proposta: safeText(currentQuote.validade_proposta),
+      observacoes: safeText(currentQuote.observacoes),
+      objeto: safeText(currentQuote.objeto),
+      missao: safeText(currentQuote.missao),
+      escopo_tecnico: safeText(currentQuote.escopo_tecnico),
+      segmentacao: safeText(currentQuote.segmentacao),
+      investimento_texto: safeText(currentQuote.investimento_texto),
+      condicoes_comerciais: safeText(currentQuote.condicoes_comerciais),
+      assinatura_tecnica: safeText(currentQuote.assinatura_tecnica),
 
       total_value: Number(totais.totalGeral || 0),
 
@@ -703,7 +791,10 @@ export default function QuoteFormPage() {
         <div className="floating-card p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
             <Label htmlFor="company_id">Empresa Emitente</Label>
-            <Select value={String(currentQuote.company_id || "")} onValueChange={handleSelectCompany}>
+            <Select
+              value={String(currentQuote.company_id || "")}
+              onValueChange={handleSelectCompany}
+            >
               <SelectTrigger className="input-field">
                 <Building className="w-4 h-4 mr-2 opacity-60" />
                 <SelectValue>
@@ -711,7 +802,9 @@ export default function QuoteFormPage() {
                     const empresa = COMPANY_OPTIONS.find(
                       (c) => String(c.id) === String(currentQuote.company_id || "")
                     );
-                    return empresa ? `${empresa.name} (${empresa.cnpj})`.toUpperCase() : "SELECIONE A EMPRESA";
+                    return empresa
+                      ? `${empresa.name} (${empresa.cnpj})`.toUpperCase()
+                      : "SELECIONE A EMPRESA";
                   })()}
                 </SelectValue>
               </SelectTrigger>
@@ -744,13 +837,20 @@ export default function QuoteFormPage() {
             >
               <SelectTrigger className="input-field">
                 <UserSquare className="w-4 h-4 mr-2 opacity-60" />
-                <SelectValue placeholder={loadingSellers ? "Carregando vendedores..." : "Selecione o vendedor"} />
+                <SelectValue
+                  placeholder={
+                    loadingSellers
+                      ? "Carregando vendedores..."
+                      : "Selecione o vendedor"
+                  }
+                />
               </SelectTrigger>
 
               <SelectContent className="glass-effect">
                 {sellersSelectList.map((s) => (
                   <SelectItem key={String(s.id)} value={String(s.id)}>
-                    {String(s.name || s.nome || "Vendedor")} {s.email ? `(${s.email})` : ""}
+                    {String(s.name || s.nome || "Vendedor")}
+                    {s.email ? ` (${s.email})` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -798,6 +898,114 @@ export default function QuoteFormPage() {
             className="input-field min-h-[110px] w-full resize-none"
             placeholder="Ex: Prazo, garantias, detalhes técnicos..."
           />
+        </div>
+
+        <div className="floating-card p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-white">
+            Campos da Proposta Comercial
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="forma_pagamento">Forma de pagamento</Label>
+              <Input
+                name="forma_pagamento"
+                value={currentQuote.forma_pagamento}
+                onChange={handleInputChange}
+                className="input-field"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="validade_proposta">Validade da proposta</Label>
+              <Input
+                name="validade_proposta"
+                value={currentQuote.validade_proposta}
+                onChange={handleInputChange}
+                className="input-field"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="objeto">Objeto</Label>
+            <textarea
+              name="objeto"
+              value={currentQuote.objeto}
+              onChange={handleInputChange}
+              className="input-field min-h-[90px] w-full resize-none"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="missao">Missão</Label>
+            <textarea
+              name="missao"
+              value={currentQuote.missao}
+              onChange={handleInputChange}
+              className="input-field min-h-[90px] w-full resize-none"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="escopo_tecnico">Escopo técnico</Label>
+            <textarea
+              name="escopo_tecnico"
+              value={currentQuote.escopo_tecnico}
+              onChange={handleInputChange}
+              className="input-field min-h-[120px] w-full resize-none"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="segmentacao">Segmentação</Label>
+            <textarea
+              name="segmentacao"
+              value={currentQuote.segmentacao}
+              onChange={handleInputChange}
+              className="input-field min-h-[100px] w-full resize-none"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="investimento_texto">Investimento</Label>
+            <textarea
+              name="investimento_texto"
+              value={currentQuote.investimento_texto}
+              onChange={handleInputChange}
+              className="input-field min-h-[100px] w-full resize-none"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="condicoes_comerciais">Condições comerciais</Label>
+            <textarea
+              name="condicoes_comerciais"
+              value={currentQuote.condicoes_comerciais}
+              onChange={handleInputChange}
+              className="input-field min-h-[100px] w-full resize-none"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="assinatura_tecnica">Assinatura técnica</Label>
+            <Input
+              name="assinatura_tecnica"
+              value={currentQuote.assinatura_tecnica}
+              onChange={handleInputChange}
+              className="input-field"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="observacoes">Observações</Label>
+            <textarea
+              name="observacoes"
+              value={currentQuote.observacoes}
+              onChange={handleInputChange}
+              className="input-field min-h-[90px] w-full resize-none"
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

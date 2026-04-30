@@ -1,76 +1,90 @@
 import React, { useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { FileDown, Printer, X } from "lucide-react";
+import { Label } from "@/components/ui/label";
 
 export default function QuotePDFPreviewDialog({
   isOpen,
   onClose,
-  onConfirm,
   previewData,
+  onConfirm,
 }) {
-  const [busy, setBusy] = useState(false);
+  const [documentType, setDocumentType] = useState("orcamento");
 
-  if (!isOpen) return null;
-
-  const run = async (fn) => {
-    try {
-      setBusy(true);
-      await fn();
-    } finally {
-      setBusy(false);
-    }
+  const handleConfirm = (action = "download") => {
+    onConfirm?.("default", {
+      action,
+      documentType,
+    });
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(v) => !v && onClose?.()}>
-      <DialogContent className="glass-effect border-white/20 text-white max-w-lg">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose?.()}>
+      <DialogContent className="max-w-lg glass-effect border-white/10 text-white">
         <DialogHeader>
-          <DialogTitle>Gerar PDF da Cotação</DialogTitle>
+          <DialogTitle>Gerar documento</DialogTitle>
         </DialogHeader>
 
-        <div className="py-4 text-sm text-white/70">
-          Clique em <b>Baixar PDF</b> ou <b>Imprimir</b>.
-        </div>
+        <div className="space-y-5">
+          <div className="space-y-3">
+            <Label>Tipo do documento</Label>
 
-        <DialogFooter className="gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onClose}
-            disabled={busy}
-          >
-            <X className="w-4 h-4 mr-2" /> Fechar
-          </Button>
+<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+  <button
+    type="button"
+    onClick={() => setDocumentType("orcamento")}
+    className={`rounded-xl border px-4 py-3 transition h-[82px] flex items-center justify-center text-center ${
+      documentType === "orcamento"
+        ? "border-blue-500 bg-blue-500/10"
+        : "border-white/10 bg-white/5 hover:bg-white/10"
+    }`}
+  >
+    <span className="font-semibold text-base">ORÇAMENTO</span>
+  </button>
 
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              run(() => onConfirm?.("orcamento", { action: "print" }))
-            }
-          >
-            <Printer className="w-4 h-4 mr-2" /> Imprimir
-          </Button>
+  <button
+    type="button"
+    onClick={() => setDocumentType("proposta_comercial")}
+    className={`rounded-xl border px-4 py-3 transition h-[82px] flex items-center justify-center text-center ${
+      documentType === "proposta_comercial"
+        ? "border-blue-500 bg-blue-500/10"
+        : "border-white/10 bg-white/5 hover:bg-white/10"
+    }`}
+  >
+    <span className="font-semibold text-base">PROPOSTA COMERCIAL</span>
+  </button>
+      </div>
+         </div>
 
-          <Button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              run(() => onConfirm?.("orcamento", { action: "download" }))
-            }
-          >
-            <FileDown className="w-4 h-4 mr-2" /> Baixar PDF
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="btn-secondary"
+                    onClick={onClose}
+                  >
+                    Fechar
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="btn-secondary"
+                    onClick={() => handleConfirm("print")}
+                  >
+                    Imprimir
+                  </Button>
+
+                  <Button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => handleConfirm("download")}
+                  >
+                    Gerar PDF
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        );
+      }

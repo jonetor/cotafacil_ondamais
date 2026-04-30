@@ -258,7 +258,7 @@ function drawBrand(doc, brand, company) {
 }
 
 /* ============================================================
-   INFO BOXES SEM TARJA
+   INFO BOXES
 ============================================================ */
 
 function drawInfoBox(doc, { x, y, w, h, title, lines }) {
@@ -342,6 +342,17 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
       notes,
       additional_info,
       contactPerson: safeText(q.contactPerson || q.contact_person || "").trim(),
+
+      forma_pagamento: safeText(q.forma_pagamento).trim(),
+      validade_proposta: safeText(q.validade_proposta).trim(),
+      observacoes: safeText(q.observacoes).trim(),
+      objeto: safeText(q.objeto).trim(),
+      missao: safeText(q.missao).trim(),
+      escopo_tecnico: safeText(q.escopo_tecnico).trim(),
+      segmentacao: safeText(q.segmentacao).trim(),
+      investimento_texto: safeText(q.investimento_texto).trim(),
+      condicoes_comerciais: safeText(q.condicoes_comerciais).trim(),
+      assinatura_tecnica: safeText(q.assinatura_tecnica).trim(),
     },
     company: {
       ...COMPANY_FALLBACK,
@@ -363,7 +374,11 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
    PDF PRINCIPAL
 ============================================================ */
 
-function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, autor }) {
+function generateOrcamentoPdf(
+  doc,
+  brand,
+  { quote, company, client, vendedor, autor, documentType = "orcamento" }
+) {
   const margin = 14;
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -385,12 +400,19 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text("PROPOSTA COMERCIAL", pageW / 2, contentTop, { align: "center" });
+  doc.text(
+    documentType === "proposta_comercial" ? "PROPOSTA COMERCIAL" : "ORÇAMENTO",
+    pageW / 2,
+    contentTop,
+    { align: "center" }
+  );
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text(`Nº: ${quote.proposalNumber} • Revisão: ${quote.revision}`, margin, contentTop + 8);
-  doc.text(`Data: ${quote.createdAtStr}`, pageW - margin, contentTop + 8, { align: "right" });
+  doc.text(`Data: ${quote.createdAtStr}`, pageW - margin, contentTop + 8, {
+    align: "right",
+  });
 
   if (sellerName) {
     doc.text(`Vendedor: ${sellerName}`, margin, contentTop + 13);
@@ -411,7 +433,11 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
 
   const clientName = safeText(client?.nome_razao || client?.name || quote.client_name || "-");
   const clientDoc = formatDoc(
-    client?.__doc || quote.client_document || client?.cpf_cnpj || client?.txIdFormated || client?.txId,
+    client?.__doc ||
+      quote.client_document ||
+      client?.cpf_cnpj ||
+      client?.txIdFormated ||
+      client?.txId,
     client?.__isPF
   );
 
@@ -476,6 +502,46 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
   };
 
   let cursorY = y + 46;
+
+  const drawTextBlock = (title, value) => {
+    if (!String(value || "").trim()) return;
+
+    if (cursorY > pageH - 60) {
+      doc.addPage();
+      drawBrand(doc, brand, company);
+      cursorY = 40;
+    }
+
+    drawSectionTitle(title, cursorY);
+    cursorY += 6;
+
+    const lines = doc.splitTextToSize(
+      String(value || ""),
+      pageW - margin * 2 - 6
+    );
+
+    autoTable(doc, {
+      startY: cursorY,
+      body: lines.map((line) => [line]),
+      margin: { left: margin, right: margin },
+      styles: {
+        fontSize: 8.5,
+        cellPadding: 3,
+        lineColor: [225, 230, 238],
+        lineWidth: 0.15,
+        textColor: [30, 30, 30],
+      },
+      columnStyles: {
+        0: { cellWidth: pageW - margin * 2 },
+      },
+      theme: "grid",
+      willDrawPage: () => {
+        drawBrand(doc, brand, company);
+      },
+    });
+
+    cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
+  };
 
   const drawTable = (title, list, subtotalLabel) => {
     if (!list.length) return;
@@ -551,6 +617,18 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
   };
 
+  /* ============================================================
+     PROPOSTA: BLOCOS ANTES DOS ITENS
+  ============================================================ */
+  if (documentType === "proposta_comercial") {
+    drawTextBlock("OBJETO", quote.objeto);
+    drawTextBlock("MISSÃO", quote.missao);
+    drawTextBlock("ESCOPO TÉCNICO", quote.escopo_tecnico);
+  }
+
+  /* ============================================================
+     ITENS
+  ============================================================ */
   drawTable("PRODUTOS", produtos, "SUBTOTAL PRODUTOS");
   drawTable("SERVIÇOS", servicos, "SUBTOTAL SERVIÇOS");
   drawTable("SERVIÇOS SCM", scm, "SUBTOTAL SERVIÇOS SCM");
@@ -588,6 +666,16 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
   }
 
+  /* ============================================================
+     PROPOSTA: BLOCOS DEPOIS DOS ITENS
+  ============================================================ */
+  if (documentType === "proposta_comercial") {
+    drawTextBlock("SEGMENTAÇÃO", quote.segmentacao);
+    drawTextBlock("INVESTIMENTO", quote.investimento_texto);
+    drawTextBlock("CONDIÇÕES COMERCIAIS", quote.condicoes_comerciais);
+    drawTextBlock("ASSINATURA TÉCNICA", quote.assinatura_tecnica);
+  }
+
   let sectionY = cursorY + 2;
   if (sectionY > pageH - 80) {
     doc.addPage();
@@ -617,19 +705,38 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
   const rightX = pageW - 64 - margin;
 
   const infoLines = [];
-  if (quote.validity_date) infoLines.push(`Validade: ${quote.validity_date} dia(s)`);
-  if (quote.payment_terms) infoLines.push(`Condições de pagamento: ${quote.payment_terms}`);
-  if (quote.freight_type) infoLines.push(`Tipo de frete: ${quote.freight_type}`);
-  if (quote.delivery_location) infoLines.push(`Local de entrega: ${quote.delivery_location}`);
 
-  const desc = safeText(quote.description || "").trim();
-  const notes = safeText(quote.notes || "").trim();
-  const additionalInfo = safeText(quote.additional_info || "").trim();
-  const showNotes = notes && notes !== desc;
+  if (documentType === "orcamento") {
+    if (quote.forma_pagamento || quote.payment_terms) {
+      infoLines.push(`Pagamento: ${quote.forma_pagamento || quote.payment_terms}`);
+    }
 
-  if (desc) infoLines.push(`Descrição: ${desc}`);
-  if (showNotes) infoLines.push(`Observações: ${notes}`);
-  if (additionalInfo) infoLines.push(`Informações adicionais: ${additionalInfo}`);
+    if (quote.validade_proposta || quote.validity_date) {
+      infoLines.push(`Validade: ${quote.validade_proposta || quote.validity_date}`);
+    }
+
+    if (quote.observacoes || quote.additional_info || quote.description) {
+      infoLines.push(
+        `Observações: ${
+          quote.observacoes || quote.additional_info || quote.description
+        }`
+      );
+    }
+  } else {
+    if (quote.validity_date) infoLines.push(`Validade: ${quote.validity_date} dia(s)`);
+    if (quote.payment_terms) infoLines.push(`Condições de pagamento: ${quote.payment_terms}`);
+    if (quote.freight_type) infoLines.push(`Tipo de frete: ${quote.freight_type}`);
+    if (quote.delivery_location) infoLines.push(`Local de entrega: ${quote.delivery_location}`);
+
+    const desc = safeText(quote.description || "").trim();
+    const notes = safeText(quote.notes || "").trim();
+    const additionalInfo = safeText(quote.additional_info || "").trim();
+    const showNotes = notes && notes !== desc;
+
+    if (desc) infoLines.push(`Descrição: ${desc}`);
+    if (showNotes) infoLines.push(`Observações: ${notes}`);
+    if (additionalInfo) infoLines.push(`Informações adicionais: ${additionalInfo}`);
+  }
 
   let infoStartY = sectionY;
 
@@ -697,6 +804,7 @@ function generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, au
 
 export const generateQuotePDF = async (payload, options = {}) => {
   const { quote, client, company, vendedor, autor } = normalizeForPdf(payload);
+  const documentType = payload?.documentType || "orcamento";
   const download = options.download !== false;
 
   const brand = await loadBrandImages(company);
@@ -708,9 +816,19 @@ export const generateQuotePDF = async (payload, options = {}) => {
     putOnlyUsedFonts: true,
   });
 
-  generateOrcamentoPdf(doc, brand, { quote, company, client, vendedor, autor });
+  generateOrcamentoPdf(doc, brand, {
+    quote,
+    company,
+    client,
+    vendedor,
+    autor,
+    documentType,
+  });
 
-  const filename = options.filename || `Orcamento-${quote.proposalNumber || "00000"}.pdf`;
+  const prefix =
+    documentType === "proposta_comercial" ? "Proposta" : "Orcamento";
+  const filename =
+    options.filename || `${prefix}-${quote.proposalNumber || "00000"}.pdf`;
 
   if (download) {
     doc.save(filename);

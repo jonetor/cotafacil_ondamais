@@ -54,6 +54,17 @@ CREATE TABLE IF NOT EXISTS quotes (
   notes TEXT,
   additional_info TEXT,
 
+  objeto TEXT,
+  missao TEXT,
+  escopo_tecnico TEXT,
+  segmentacao TEXT,
+  investimento_texto TEXT,
+  condicoes_comerciais TEXT,
+  assinatura_tecnica TEXT,
+  forma_pagamento TEXT,
+  validade_proposta TEXT,
+  observacoes TEXT,
+
   subtotal REAL DEFAULT 0,
   tax_total REAL DEFAULT 0,
   discount_total REAL DEFAULT 0,
@@ -103,6 +114,17 @@ ensureColumn("quotes", "freight_type", "freight_type TEXT");
 ensureColumn("quotes", "delivery_location", "delivery_location TEXT");
 ensureColumn("quotes", "notes", "notes TEXT");
 ensureColumn("quotes", "additional_info", "additional_info TEXT");
+
+ensureColumn("quotes", "objeto", "objeto TEXT");
+ensureColumn("quotes", "missao", "missao TEXT");
+ensureColumn("quotes", "escopo_tecnico", "escopo_tecnico TEXT");
+ensureColumn("quotes", "segmentacao", "segmentacao TEXT");
+ensureColumn("quotes", "investimento_texto", "investimento_texto TEXT");
+ensureColumn("quotes", "condicoes_comerciais", "condicoes_comerciais TEXT");
+ensureColumn("quotes", "assinatura_tecnica", "assinatura_tecnica TEXT");
+ensureColumn("quotes", "forma_pagamento", "forma_pagamento TEXT");
+ensureColumn("quotes", "validade_proposta", "validade_proposta TEXT");
+ensureColumn("quotes", "observacoes", "observacoes TEXT");
 
 ensureColumn("quote_items", "item_type", "item_type TEXT");
 ensureColumn("quote_items", "icms", "icms REAL DEFAULT 0");
@@ -277,13 +299,23 @@ router.post("/", requireAuth, (req, res) => {
         delivery_location,
         notes,
         additional_info,
+        objeto,
+        missao,
+        escopo_tecnico,
+        segmentacao,
+        investimento_texto,
+        condicoes_comerciais,
+        assinatura_tecnica,
+        forma_pagamento,
+        validade_proposta,
+        observacoes,
         subtotal,
         tax_total,
         total_value,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     ).run(
       id,
@@ -305,6 +337,16 @@ router.post("/", requireAuth, (req, res) => {
       data.delivery_location || "",
       data.notes || "",
       data.additional_info || "",
+      data.objeto || "",
+      data.missao || "",
+      data.escopo_tecnico || "",
+      data.segmentacao || "",
+      data.investimento_texto || "",
+      data.condicoes_comerciais || "",
+      data.assinatura_tecnica || "",
+      data.forma_pagamento || "",
+      data.validade_proposta || "",
+      data.observacoes || "",
       totals.subtotal,
       totals.tax_total,
       totals.total_value,
@@ -419,6 +461,16 @@ router.put("/:id", requireAuth, (req, res) => {
           delivery_location = ?,
           notes = ?,
           additional_info = ?,
+          objeto = ?,
+          missao = ?,
+          escopo_tecnico = ?,
+          segmentacao = ?,
+          investimento_texto = ?,
+          condicoes_comerciais = ?,
+          assinatura_tecnica = ?,
+          forma_pagamento = ?,
+          validade_proposta = ?,
+          observacoes = ?,
           subtotal = ?,
           tax_total = ?,
           total_value = ?,
@@ -445,6 +497,16 @@ router.put("/:id", requireAuth, (req, res) => {
         data.delivery_location || "",
         data.notes || "",
         data.additional_info || "",
+        data.objeto || "",
+        data.missao || "",
+        data.escopo_tecnico || "",
+        data.segmentacao || "",
+        data.investimento_texto || "",
+        data.condicoes_comerciais || "",
+        data.assinatura_tecnica || "",
+        data.forma_pagamento || "",
+        data.validade_proposta || "",
+        data.observacoes || "",
         totals.subtotal,
         totals.tax_total,
         totals.total_value,
@@ -517,20 +579,12 @@ router.put("/:id", requireAuth, (req, res) => {
       entity: "quote",
       entity_id: id,
       details: {
-        before: previous
-          ? {
-              proposal_number: previous.proposal_number,
-              client_name: previous.client_name,
-              seller_id: previous.seller_id,
-              status: previous.status,
-              total_value: previous.total_value,
-            }
-          : null,
+        before: previous || null,
         after: {
           proposal_number: data.proposal_number || "",
           client_name: data.client_name || "",
+          client_id: data.client_id || null,
           seller_id: data.seller_id || null,
-          status: data.status || "pending",
           total_value: totals.total_value,
           items_count: items.length,
         },
@@ -539,49 +593,8 @@ router.put("/:id", requireAuth, (req, res) => {
 
     res.json({ ok: true, id });
   } catch (e) {
-    res.status(404).json({ error: e?.message || String(e) });
+    res.status(500).json({ error: e?.message || String(e) });
   }
-});
-
-/* ===============================
-   APROVAR COTAÇÃO
-================================ */
-
-router.post("/:id/approve", requireAuth, (req, res) => {
-  const id = req.params.id;
-  const now = Date.now();
-
-  const previous = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
-
-  const result = db.prepare(
-    `
-    UPDATE quotes
-    SET status = 'approved', updated_at = ?
-    WHERE id = ?
-    `
-  ).run(now, id);
-
-  if (result.changes === 0) {
-    return res.status(404).json({ error: "Cotação não encontrada" });
-  }
-
-  const updated = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
-
-  writeAuditLog({
-    user: req.user,
-    action: "approve",
-    entity: "quote",
-    entity_id: id,
-    details: {
-      before_status: previous?.status || null,
-      after_status: updated?.status || "approved",
-      proposal_number: updated?.proposal_number || "",
-      client_name: updated?.client_name || "",
-      total_value: updated?.total_value || 0,
-    },
-  });
-
-  res.json({ ok: true });
 });
 
 /* ===============================
@@ -590,12 +603,14 @@ router.post("/:id/approve", requireAuth, (req, res) => {
 
 router.delete("/:id", requireAuth, (req, res) => {
   const id = req.params.id;
-
   const previous = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
 
   const trx = db.transaction(() => {
     db.prepare(`DELETE FROM quote_items WHERE quote_id = ?`).run(id);
-    db.prepare(`DELETE FROM quotes WHERE id = ?`).run(id);
+    const result = db.prepare(`DELETE FROM quotes WHERE id = ?`).run(id);
+    if (result.changes === 0) {
+      throw new Error("Cotação não encontrada");
+    }
   });
 
   try {
@@ -606,15 +621,7 @@ router.delete("/:id", requireAuth, (req, res) => {
       action: "delete",
       entity: "quote",
       entity_id: id,
-      details: previous
-        ? {
-            proposal_number: previous.proposal_number,
-            client_name: previous.client_name,
-            seller_id: previous.seller_id,
-            status: previous.status,
-            total_value: previous.total_value,
-          }
-        : null,
+      details: previous || null,
     });
 
     res.json({ ok: true });
