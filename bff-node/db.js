@@ -69,6 +69,60 @@ function ensureProductsSchema() {
   }
 }
 
+function ensureQuotesExtraSchema() {
+  const exists = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='quotes'`)
+    .get();
+
+  if (!exists) return;
+
+  const cols = db.prepare(`PRAGMA table_info('quotes')`).all();
+  const names = new Set(cols.map((c) => c.name));
+
+  const extraColumns = [
+    ["objeto", "TEXT"],
+    ["missao", "TEXT"],
+    ["escopo_tecnico", "TEXT"],
+    ["segmentacao", "TEXT"],
+    ["investimento_texto", "TEXT"],
+    ["condicoes_comerciais", "TEXT"],
+    ["assinatura_tecnica", "TEXT"],
+    ["forma_pagamento", "TEXT"],
+    ["validade_proposta", "TEXT"],
+    ["observacoes", "TEXT"],
+  ];
+
+  for (const [column, type] of extraColumns) {
+    if (!names.has(column)) {
+      db.prepare(`ALTER TABLE quotes ADD COLUMN ${column} ${type}`).run();
+    }
+  }
+}
+
+function ensureQuoteItemsDiscountSchema() {
+  const exists = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='quote_items'`)
+    .get();
+
+  if (!exists) return;
+
+  const cols = db.prepare(`PRAGMA table_info('quote_items')`).all();
+  const names = new Set(cols.map((c) => c.name));
+
+  const extraColumns = [
+    ["discount_type", "TEXT DEFAULT 'value'"],
+    ["discount_value", "REAL DEFAULT 0"],
+    ["discount_total", "REAL DEFAULT 0"],
+    ["total_price_original", "REAL DEFAULT 0"],
+  ];
+
+  for (const [column, type] of extraColumns) {
+    if (!names.has(column)) {
+      db.prepare(`ALTER TABLE quote_items ADD COLUMN ${column} ${type}`).run();
+    }
+  }
+}
+
 export function initDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS voalle_clients (
@@ -109,21 +163,16 @@ export function initDb() {
       id TEXT PRIMARY KEY,
       customer_id TEXT,
       customer_name TEXT,
-
       status TEXT NOT NULL DEFAULT 'draft',
-
       notes TEXT,
-
       seller_id TEXT,
       seller_name TEXT,
       seller_email TEXT,
-
       subtotal REAL NOT NULL DEFAULT 0,
       discount_total REAL NOT NULL DEFAULT 0,
       tax_total REAL NOT NULL DEFAULT 0,
       freight_total REAL NOT NULL DEFAULT 0,
       total REAL NOT NULL DEFAULT 0,
-
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -136,35 +185,26 @@ export function initDb() {
 
     CREATE TABLE IF NOT EXISTS products (
       id TEXT PRIMARY KEY,
-
       cod TEXT,
       description TEXT,
       type TEXT,
       unit TEXT,
-
       sale_price REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0,
-
       active INTEGER NOT NULL DEFAULT 1,
-
       source TEXT NOT NULL DEFAULT 'manual',
-
       use TEXT,
       original_price REAL,
       payment_form TEXT,
       payment_form_code TEXT,
-
       is_loyalty INTEGER,
       loyalty_price REAL,
       loyalty_months INTEGER,
-
       campaign_code TEXT,
       campaign_title TEXT,
-
       price_list_id INTEGER,
       price_list_code TEXT,
       price_list_title TEXT,
-
       raw_json TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -184,28 +224,17 @@ export function initDb() {
 
     CREATE TABLE IF NOT EXISTS budget_items (
       id TEXT PRIMARY KEY,
-
       budget_id TEXT NOT NULL,
-
       product_id TEXT,
-
       item_type TEXT,
-
       code TEXT,
       description TEXT,
-
       unit TEXT,
-
       quantity REAL NOT NULL DEFAULT 1,
-
       unit_price REAL NOT NULL DEFAULT 0,
-
       total_price REAL NOT NULL DEFAULT 0,
-
       tax_percent REAL DEFAULT 0,
-
       stock_quantity REAL DEFAULT 0,
-
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -217,51 +246,8 @@ export function initDb() {
       ON budget_items(product_id);
   `);
 
-  // ✅ FISCAL (DF-e) - tabelas para import/sync (upload admin / sync por NSU)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS fiscal_companies (
-      id TEXT PRIMARY KEY,
-      cnpj TEXT NOT NULL,
-      cnpj_digits TEXT NOT NULL UNIQUE,
-      name TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_fiscal_companies_cnpj_digits
-      ON fiscal_companies(cnpj_digits);
-
-    CREATE TABLE IF NOT EXISTS dfe_cursor (
-      company_id TEXT NOT NULL,
-      doc_type TEXT NOT NULL,         -- NFE|CTE|MDFE
-      last_nsu INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (company_id, doc_type),
-      FOREIGN KEY (company_id) REFERENCES fiscal_companies(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS fiscal_documents (
-      id TEXT PRIMARY KEY,
-      company_id TEXT NOT NULL,
-      doc_type TEXT NOT NULL,         -- NFE|CTE|MDFE
-      nsu INTEGER NOT NULL,
-      chave TEXT,
-      schema TEXT,
-      emit_cnpj TEXT,
-      dest_cnpj TEXT,
-      dh_emi TEXT,
-      valor REAL,
-      resumo_xml TEXT,
-      xml_completo TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(company_id, doc_type, nsu),
-      FOREIGN KEY (company_id) REFERENCES fiscal_companies(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_fiscal_docs_company_type_date
-      ON fiscal_documents(company_id, doc_type, dh_emi);
-  `);
-
   ensureAuthUsersSchema();
   ensureProductsSchema();
+  ensureQuotesExtraSchema();
+  ensureQuoteItemsDiscountSchema();
 }

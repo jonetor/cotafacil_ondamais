@@ -79,19 +79,49 @@ function n(v) {
   return Number.isFinite(x) ? x : 0;
 }
 
+function calcItemWithDiscount(item) {
+  const quantity = n(item.quantity);
+  const unit_price = n(item.unit_price);
+  const total_price_original = quantity * unit_price;
+
+  const discount_type = String(item.discount_type || "value");
+  const discount_value = n(item.discount_value);
+
+  let discount_total = 0;
+
+  if (discount_type === "percent") {
+    discount_total = total_price_original * (discount_value / 100);
+  } else {
+    discount_total = discount_value;
+  }
+
+  if (discount_total < 0) discount_total = 0;
+  if (discount_total > total_price_original) discount_total = total_price_original;
+
+  const total_price = total_price_original - discount_total;
+
+  return {
+    ...item,
+    quantity,
+    unit_price,
+    discount_type,
+    discount_value,
+    discount_total,
+    total_price_original,
+    total_price,
+  };
+}
+
 function normalizeItems(items) {
   const list = Array.isArray(items) ? items : [];
   return list.map((it) => {
-    const quantity = n(it.quantity);
-    const unit_price = n(it.unit_price);
     const item_type = String(
       it.item_type || it.type || it.itemType || "PRODUTO"
     ).toUpperCase();
     const icms = n(it.icms ?? it?.taxes?.icms);
     const issqn = n(it.issqn ?? it?.taxes?.issqn);
-    const total_price = n(it.total_price) || quantity * unit_price;
 
-    return {
+    const base = calcItemWithDiscount({
       ...it,
       uid: it.uid || it.id || uid(),
       item_type: item_type === "SERVICE" ? "SERVICO" : item_type,
@@ -100,9 +130,12 @@ function normalizeItems(items) {
       code: it.code || it.cod || it.codigo || "",
       description: it.description || it.descricao || "",
       unit: it.unit || "un",
-      quantity,
-      unit_price,
-      total_price,
+      discount_type: it.discount_type || "value",
+      discount_value: it.discount_value || 0,
+    });
+
+    return {
+      ...base,
       icms,
       issqn,
       taxes: { ...(it.taxes || {}), icms, issqn },
@@ -478,6 +511,7 @@ export default function QuoteFormPage() {
 
   const totais = useMemo(() => {
     const items = Array.isArray(currentQuote.items) ? currentQuote.items : [];
+
     const subtotalProdutos = productItems.reduce(
       (acc, item) => acc + (item.total_price || 0),
       0
@@ -490,15 +524,31 @@ export default function QuoteFormPage() {
       (acc, item) => acc + (item.total_price || 0),
       0
     );
+
+    const subtotalBruto = items.reduce(
+      (acc, item) =>
+        acc + n(item.total_price_original || (n(item.quantity) * n(item.unit_price))),
+      0
+    );
+
+    const totalDesconto = items.reduce(
+      (acc, item) => acc + n(item.discount_total),
+      0
+    );
+
     const totalTributos = items.reduce(
       (acc, item) => acc + n(item?.taxes?.total_tributos_item || 0),
       0
     );
+
     const totalGeral = subtotalProdutos + subtotalServicos + subtotalScm;
+
     return {
       subtotalProdutos,
       subtotalServicos,
       subtotalScm,
+      subtotalBruto,
+      totalDesconto,
       totalTributos,
       totalGeral,
     };
@@ -536,6 +586,9 @@ export default function QuoteFormPage() {
         subtotal_produtos: totais.subtotalProdutos,
         subtotal_servicos: totais.subtotalServicos,
         subtotal_scm: totais.subtotalScm,
+        subtotal_bruto: totais.subtotalBruto,
+        discount_total: totais.totalDesconto,
+        total_geral_com_desconto: totais.totalGeral,
         description: safeText(currentQuote.description),
         additional_info: safeText(currentQuote.additional_info),
         notes: safeText(currentQuote.description),
@@ -568,7 +621,7 @@ export default function QuoteFormPage() {
       toast({
         variant: "destructive",
         title: "Selecione um cliente",
-        description: "Escolha um cliente antes de gerar o PDF.",
+        description: "Escolha um cliente antes de gerar o documento.",
       });
       return;
     }
@@ -598,6 +651,57 @@ export default function QuoteFormPage() {
         return;
       }
 
+      if (action === "download" && documentType === "proposta_comercial") {
+        if (!currentQuote?.id) {
+          toast({
+            variant: "destructive",
+            title: "Salve a cotação primeiro",
+            description: "Para baixar a proposta comercial em DOCX, salve a cotação antes.",
+          });
+          return;
+        }
+
+        const response = await fetch(
+          `/api/quotes/${currentQuote.id}/export-proposal-docx`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(pdfPreviewData),
+          }
+        );
+
+        if (!response.ok) {
+          let message = "Erro ao gerar arquivo DOCX.";
+          try {
+            const data = await response.json();
+            message = data?.error || message;
+          } catch {
+            // sem ação
+          }
+          throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const proposalNumber = String(
+          currentQuote?.proposal_number ||
+            pdfPreviewData?.quote?.proposal_number ||
+            "00000"
+        );
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Proposta-Comercial-${proposalNumber}.docx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        return;
+      }
+
       await generateQuotePDF({
         ...pdfPreviewData,
         template,
@@ -606,7 +710,7 @@ export default function QuoteFormPage() {
     } catch (e) {
       toast({
         variant: "destructive",
-        title: "Erro ao gerar PDF",
+        title: "Erro ao gerar documento",
         description: e?.message || String(e),
       });
     }
@@ -700,6 +804,7 @@ export default function QuoteFormPage() {
       assinatura_tecnica: safeText(currentQuote.assinatura_tecnica),
 
       total_value: Number(totais.totalGeral || 0),
+      discount_total: Number(totais.totalDesconto || 0),
 
       items: normalizeItems(currentQuote.items).map((item) => ({
         id: item.id || undefined,
@@ -711,6 +816,10 @@ export default function QuoteFormPage() {
         quantity: item.quantity,
         unit_price: item.unit_price,
         total_price: item.total_price,
+        total_price_original: item.total_price_original,
+        discount_type: item.discount_type || "value",
+        discount_value: item.discount_value || 0,
+        discount_total: item.discount_total || 0,
         icms: n(item.icms ?? item?.taxes?.icms),
         issqn: n(item.issqn ?? item?.taxes?.issqn),
         taxes: item.taxes || {},
@@ -778,7 +887,7 @@ export default function QuoteFormPage() {
               disabled={!canOpenPdf}
             >
               <FileDown className="w-4 h-4 mr-2" />
-              Gerar PDF
+              Gerar Documento
             </Button>
 
             <Button type="submit" className="btn-primary" disabled={!canSave}>
@@ -1010,7 +1119,14 @@ export default function QuoteFormPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="floating-card p-6">
-            <QuoteTotals totais={totais} />
+            <QuoteTotals
+              totais={{
+                ...totais,
+                totalGeral: totais.totalGeral,
+                discountTotal: totais.totalDesconto,
+                subtotalBruto: totais.subtotalBruto,
+              }}
+            />
           </div>
 
           <div className="floating-card p-6">

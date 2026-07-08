@@ -8,7 +8,15 @@ function n(v) {
   return Number.isFinite(x) ? x : 0;
 }
 
-export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicate, type, totals }) {
+export default function ItemTable({
+  title,
+  items,
+  onUpdate,
+  onRemove,
+  onDuplicate,
+  type,
+  totals,
+}) {
   const safeItems = Array.isArray(items) ? items : [];
 
   const get = (item, a, b, fallback = '') => {
@@ -20,7 +28,6 @@ export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicat
   };
 
   const getTaxes = (item) => {
-    // aceita { taxes:{icms,issqn,...} } ou campos soltos
     const t = item?.taxes || {};
     return {
       icms: n(t.icms ?? item?.icms_percent ?? item?.icms ?? 0),
@@ -47,18 +54,25 @@ export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicat
         <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
       </div>
 
-      {/* sem overflow-x em cada bloco (evita a barra de rolagem horizontal por seção) */}
       <div className="rounded-xl border border-slate-800 overflow-hidden">
         <table className="w-full text-sm text-slate-200 table-fixed">
           <thead className="bg-slate-800/60 text-slate-400">
             <tr>
-              <th className="p-3 text-left font-semibold w-32">Código</th>
-              <th className="p-3 text-left font-semibold">{isService ? 'Serviço' : 'Produto'}</th>
-              <th className="p-3 text-center font-semibold w-24">Qtde</th>
-              <th className="p-3 text-right font-semibold w-36">Preço Unit.</th>
-              <th className="p-3 text-center font-semibold w-24">{isService ? 'ISSQN %' : 'ICMS %'}</th>
-              {isService ? <th className="p-3 text-center font-semibold w-24">Prazo</th> : null}
-              <th className="p-3 text-right font-semibold w-40">Valor Total R$</th>
+              <th className="p-3 text-left font-semibold w-28">Código</th>
+              <th className="p-3 text-left font-semibold">
+                {isService ? 'Serviço' : 'Produto'}
+              </th>
+              <th className="p-3 text-center font-semibold w-20">Qtde</th>
+              <th className="p-3 text-right font-semibold w-32">Preço Unit.</th>
+              <th className="p-3 text-center font-semibold w-24">Desc. %</th>
+              <th className="p-3 text-right font-semibold w-32">Desc. R$</th>
+              <th className="p-3 text-center font-semibold w-24">
+                {isService ? 'ISSQN %' : 'ICMS %'}
+              </th>
+              {isService ? (
+                <th className="p-3 text-center font-semibold w-24">Prazo</th>
+              ) : null}
+              <th className="p-3 text-right font-semibold w-36">Valor Total R$</th>
               <th className="p-3 w-24"></th>
             </tr>
           </thead>
@@ -68,9 +82,14 @@ export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicat
               const uid = item.uid ?? item.id;
               const taxes = getTaxes(item);
               const total = n(item.total_price ?? item.valor_total);
+              const discountValue = n(item.discount_value);
+              const discountTotal = n(item.discount_total);
 
               return (
-                <tr key={uid} className="border-t border-slate-800 hover:bg-slate-800/40 transition-colors">
+                <tr
+                  key={uid}
+                  className="border-t border-slate-800 hover:bg-slate-800/40 transition-colors"
+                >
                   <td className="p-3">
                     <Input
                       value={get(item, 'code', 'codigo', '')}
@@ -112,9 +131,32 @@ export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicat
                     <Input
                       type="number"
                       min={0}
+                      max={100}
+                      step="0.01"
+                      value={discountValue}
+                      onChange={(e) => onUpdate(uid, 'discount_value', n(e.target.value))}
+                      className="input-field h-10 text-center"
+                    />
+                  </td>
+
+                  <td className="p-3 text-right">
+                    <div className="h-10 flex items-center justify-end font-mono text-amber-300">
+                      {discountTotal.toLocaleString('pt-BR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </div>
+                  </td>
+
+                  <td className="p-3">
+                    <Input
+                      type="number"
+                      min={0}
                       step="0.01"
                       value={isService ? taxes.issqn : taxes.icms}
-                      onChange={(e) => setTax(uid, item, isService ? 'issqn' : 'icms', e.target.value)}
+                      onChange={(e) =>
+                        setTax(uid, item, isService ? 'issqn' : 'icms', e.target.value)
+                      }
                       className="input-field h-10 text-center"
                     />
                   </td>
@@ -133,7 +175,10 @@ export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicat
 
                   <td className="p-3 text-right">
                     <div className="h-10 flex items-center justify-end font-mono text-slate-100">
-                      {total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {total.toLocaleString('pt-BR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </div>
                   </td>
 
@@ -167,7 +212,7 @@ export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicat
 
             {safeItems.length === 0 ? (
               <tr>
-                <td colSpan={isService ? 8 : 7} className="p-8 text-center text-slate-500">
+                <td colSpan={isService ? 10 : 9} className="p-8 text-center text-slate-500">
                   Nenhum item.
                 </td>
               </tr>
@@ -178,12 +223,30 @@ export default function ItemTable({ title, items, onUpdate, onRemove, onDuplicat
 
       {totals ? (
         <div className="flex justify-end">
-          <div className="text-right">
+          <div className="text-right space-y-1">
             <div className="text-sm text-slate-400">
-              Tributos {totals.taxLabel}: R$ {n(totals.tax).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              Subtotal bruto: R${' '}
+              {n(totals.subtotalBruto).toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+              })}
+            </div>
+            <div className="text-sm text-amber-400">
+              Desconto total: R${' '}
+              {n(totals.discountTotal).toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+              })}
+            </div>
+            <div className="text-sm text-slate-400">
+              Tributos {totals.taxLabel || ''}: R${' '}
+              {n(totals.tax).toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+              })}
             </div>
             <div className="text-xl font-bold text-slate-100">
-              Subtotal {title}: R$ {n(totals.subtotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              Subtotal {title}: R${' '}
+              {n(totals.subtotal).toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+              })}
             </div>
           </div>
         </div>

@@ -46,3 +46,26 @@ export async function bffPost(path, body) {
     body: JSON.stringify(body ?? {}),
   });
 }
+function ensureQuoteItemsDiscountSchema() {
+  const exists = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='quote_items'`)
+    .get();
+
+  if (!exists) return;
+
+  const cols = db.prepare(`PRAGMA table_info('quote_items')`).all();
+  const names = new Set(cols.map((c) => c.name));
+
+  const extraColumns = [
+    ["discount_type", "TEXT DEFAULT 'value'"],
+    ["discount_value", "REAL DEFAULT 0"],
+    ["discount_total", "REAL DEFAULT 0"],
+    ["total_price_original", "REAL DEFAULT 0"],
+  ];
+
+  for (const [column, type] of extraColumns) {
+    if (!names.has(column)) {
+      db.prepare(`ALTER TABLE quote_items ADD COLUMN ${column} ${type}`).run();
+    }
+  }
+}

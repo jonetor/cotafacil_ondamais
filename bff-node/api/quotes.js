@@ -3,12 +3,9 @@ import crypto from "node:crypto";
 import { db } from "../db.js";
 import { requireAuth } from "./auth.js";
 import { writeAuditLog } from "../audit.js";
+import { generateProposalDocx } from "../services/proposalDocxGenerator.js";
 
 const router = express.Router();
-
-/* ===============================
-   MIGRAÇÃO DEFENSIVA
-================================ */
 
 function getColumns(table) {
   return db.prepare(`PRAGMA table_info(${table})`).all();
@@ -21,10 +18,6 @@ function ensureColumn(table, columnName, sqlDef) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${sqlDef}`);
   }
 }
-
-/* ===============================
-   CRIA TABELAS SE NÃO EXISTIREM
-================================ */
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS quotes (
@@ -85,6 +78,10 @@ CREATE TABLE IF NOT EXISTS quote_items (
   quantity REAL,
   unit_price REAL,
   total_price REAL,
+  total_price_original REAL DEFAULT 0,
+  discount_type TEXT DEFAULT 'value',
+  discount_value REAL DEFAULT 0,
+  discount_total REAL DEFAULT 0,
   icms REAL DEFAULT 0,
   issqn REAL DEFAULT 0
 );
@@ -92,10 +89,6 @@ CREATE TABLE IF NOT EXISTS quote_items (
 CREATE INDEX IF NOT EXISTS idx_quote_items_quote
 ON quote_items(quote_id);
 `);
-
-/* ===============================
-   GARANTE COLUNAS EM BANCOS ANTIGOS
-================================ */
 
 ensureColumn("quotes", "proposal_number", "proposal_number TEXT");
 ensureColumn("quotes", "revision", "revision INTEGER DEFAULT 0");
@@ -114,7 +107,6 @@ ensureColumn("quotes", "freight_type", "freight_type TEXT");
 ensureColumn("quotes", "delivery_location", "delivery_location TEXT");
 ensureColumn("quotes", "notes", "notes TEXT");
 ensureColumn("quotes", "additional_info", "additional_info TEXT");
-
 ensureColumn("quotes", "objeto", "objeto TEXT");
 ensureColumn("quotes", "missao", "missao TEXT");
 ensureColumn("quotes", "escopo_tecnico", "escopo_tecnico TEXT");
@@ -129,38 +121,69 @@ ensureColumn("quotes", "observacoes", "observacoes TEXT");
 ensureColumn("quote_items", "item_type", "item_type TEXT");
 ensureColumn("quote_items", "icms", "icms REAL DEFAULT 0");
 ensureColumn("quote_items", "issqn", "issqn REAL DEFAULT 0");
+ensureColumn("quote_items", "discount_type", "discount_type TEXT DEFAULT 'value'");
+ensureColumn("quote_items", "discount_value", "discount_value REAL DEFAULT 0");
+ensureColumn("quote_items", "discount_total", "discount_total REAL DEFAULT 0");
+ensureColumn("quote_items", "total_price_original", "total_price_original REAL DEFAULT 0");
 
-/* ===============================
-   CALCULAR TOTAIS
-================================ */
+function calcItemAmounts(item = {}) {
+  const qty = Number(item.quantity || 0);
+  const price = Number(item.unit_price || 0);
+  const totalOriginal =
+    Number(item.total_price_original ?? qty * price) || qty * price;
+
+  const discountType = String(item.discount_type || "value");
+  const discountValue = Number(item.discount_value || 0);
+
+  let discountTotal = Number(item.discount_total || 0);
+
+  if (!discountTotal && discountValue > 0) {
+    if (discountType === "percent") {
+      discountTotal = totalOriginal * (discountValue / 100);
+    } else {
+      discountTotal = discountValue;
+    }
+  }
+
+  if (discountTotal < 0) discountTotal = 0;
+  if (discountTotal > totalOriginal) discountTotal = totalOriginal;
+
+  const total = Number(item.total_price ?? totalOriginal - discountTotal);
+
+  return {
+    qty,
+    price,
+    totalOriginal,
+    discountType,
+    discountValue,
+    discountTotal,
+    total: totalOriginal - discountTotal,
+  };
+}
 
 function calcTotalsFromPayload(items = []) {
   let subtotal = 0;
   let tax = 0;
+  let discountTotal = 0;
 
   for (const item of items) {
-    const qty = Number(item.quantity || 0);
-    const price = Number(item.unit_price || 0);
-    const total = Number(item.total_price ?? qty * price);
-
-    subtotal += total;
+    const calc = calcItemAmounts(item);
+    subtotal += calc.total;
+    discountTotal += calc.discountTotal;
 
     const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
     const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
 
-    tax += total * ((icms + issqn) / 100);
+    tax += calc.total * ((icms + issqn) / 100);
   }
 
   return {
     subtotal,
     tax_total: tax,
+    discount_total: discountTotal,
     total_value: subtotal + tax,
   };
 }
-
-/* ===============================
-   LISTAR COTAÇÕES
-================================ */
 
 router.get("/", requireAuth, (req, res) => {
   try {
@@ -189,28 +212,7 @@ router.get("/", requireAuth, (req, res) => {
             FROM quote_items qi
             WHERE qi.quote_id = q.id
               AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
-          ), 0) AS total_comodato,
-
-          COALESCE((
-            SELECT COUNT(*)
-            FROM quote_items qi
-            WHERE qi.quote_id = q.id
-              AND UPPER(COALESCE(qi.item_type, '')) = 'PRODUTO'
-          ), 0) AS qtd_itens_produtos,
-
-          COALESCE((
-            SELECT COUNT(*)
-            FROM quote_items qi
-            WHERE qi.quote_id = q.id
-              AND UPPER(COALESCE(qi.item_type, '')) IN ('SERVICO', 'SERVIÇO')
-          ), 0) AS qtd_itens_servicos,
-
-          COALESCE((
-            SELECT COUNT(*)
-            FROM quote_items qi
-            WHERE qi.quote_id = q.id
-              AND UPPER(COALESCE(qi.item_type, '')) = 'SERVICO_SCM'
-          ), 0) AS qtd_itens_comodato
+          ), 0) AS total_comodato
 
         FROM quotes q
         ORDER BY q.created_at DESC
@@ -224,36 +226,18 @@ router.get("/", requireAuth, (req, res) => {
   }
 });
 
-/* ===============================
-   BUSCAR UMA COTAÇÃO
-================================ */
-
 router.get("/:id", requireAuth, (req, res) => {
   try {
     const id = req.params.id;
 
-    const quote = db
-      .prepare(
-        `
-        SELECT *
-        FROM quotes
-        WHERE id = ?
-        `
-      )
-      .get(id);
+    const quote = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
 
     if (!quote) {
       return res.status(404).json({ error: "Cotação não encontrada" });
     }
 
     const items = db
-      .prepare(
-        `
-        SELECT *
-        FROM quote_items
-        WHERE quote_id = ?
-        `
-      )
+      .prepare(`SELECT * FROM quote_items WHERE quote_id = ?`)
       .all(id);
 
     quote.items = items;
@@ -263,10 +247,6 @@ router.get("/:id", requireAuth, (req, res) => {
     res.status(500).json({ error: e?.message || String(e) });
   }
 });
-
-/* ===============================
-   CRIAR COTAÇÃO
-================================ */
 
 router.post("/", requireAuth, (req, res) => {
   const data = req.body || {};
@@ -311,11 +291,12 @@ router.post("/", requireAuth, (req, res) => {
         observacoes,
         subtotal,
         tax_total,
+        discount_total,
         total_value,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     ).run(
       id,
@@ -349,6 +330,7 @@ router.post("/", requireAuth, (req, res) => {
       data.observacoes || "",
       totals.subtotal,
       totals.tax_total,
+      totals.discount_total,
       totals.total_value,
       now,
       now
@@ -367,17 +349,19 @@ router.post("/", requireAuth, (req, res) => {
         quantity,
         unit_price,
         total_price,
+        total_price_original,
+        discount_type,
+        discount_value,
+        discount_total,
         icms,
         issqn
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 
     for (const item of items) {
-      const qty = Number(item.quantity || 0);
-      const price = Number(item.unit_price || 0);
-      const total = Number(item.total_price ?? qty * price);
+      const calc = calcItemAmounts(item);
 
       const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
       const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
@@ -390,9 +374,13 @@ router.post("/", requireAuth, (req, res) => {
         item.code || "",
         item.description || "",
         item.unit || "un",
-        qty,
-        price,
-        total,
+        calc.qty,
+        calc.price,
+        calc.total,
+        calc.totalOriginal,
+        calc.discountType,
+        calc.discountValue,
+        calc.discountTotal,
         icms,
         issqn
       );
@@ -422,10 +410,6 @@ router.post("/", requireAuth, (req, res) => {
     res.status(500).json({ error: e?.message || String(e) });
   }
 });
-
-/* ===============================
-   ATUALIZAR COTAÇÃO
-================================ */
 
 router.put("/:id", requireAuth, (req, res) => {
   const id = req.params.id;
@@ -473,6 +457,7 @@ router.put("/:id", requireAuth, (req, res) => {
           observacoes = ?,
           subtotal = ?,
           tax_total = ?,
+          discount_total = ?,
           total_value = ?,
           updated_at = ?
         WHERE id = ?
@@ -509,6 +494,7 @@ router.put("/:id", requireAuth, (req, res) => {
         data.observacoes || "",
         totals.subtotal,
         totals.tax_total,
+        totals.discount_total,
         totals.total_value,
         now,
         id
@@ -518,12 +504,7 @@ router.put("/:id", requireAuth, (req, res) => {
       throw new Error("Cotação não encontrada");
     }
 
-    db.prepare(
-      `
-      DELETE FROM quote_items
-      WHERE quote_id = ?
-      `
-    ).run(id);
+    db.prepare(`DELETE FROM quote_items WHERE quote_id = ?`).run(id);
 
     const insertItem = db.prepare(
       `
@@ -538,17 +519,19 @@ router.put("/:id", requireAuth, (req, res) => {
         quantity,
         unit_price,
         total_price,
+        total_price_original,
+        discount_type,
+        discount_value,
+        discount_total,
         icms,
         issqn
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 
     for (const item of items) {
-      const qty = Number(item.quantity || 0);
-      const price = Number(item.unit_price || 0);
-      const total = Number(item.total_price ?? qty * price);
+      const calc = calcItemAmounts(item);
 
       const icms = Number(item?.icms ?? item?.taxes?.icms ?? 0);
       const issqn = Number(item?.issqn ?? item?.taxes?.issqn ?? 0);
@@ -561,9 +544,13 @@ router.put("/:id", requireAuth, (req, res) => {
         item.code || "",
         item.description || "",
         item.unit || "un",
-        qty,
-        price,
-        total,
+        calc.qty,
+        calc.price,
+        calc.total,
+        calc.totalOriginal,
+        calc.discountType,
+        calc.discountValue,
+        calc.discountTotal,
         icms,
         issqn
       );
@@ -597,10 +584,6 @@ router.put("/:id", requireAuth, (req, res) => {
   }
 });
 
-/* ===============================
-   EXCLUIR COTAÇÃO
-================================ */
-
 router.delete("/:id", requireAuth, (req, res) => {
   const id = req.params.id;
   const previous = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
@@ -627,6 +610,106 @@ router.delete("/:id", requireAuth, (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+router.post("/:id/approve", requireAuth, (req, res) => {
+  const id = req.params.id;
+  const now = Date.now();
+
+  try {
+    const previous = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
+
+    if (!previous) {
+      return res.status(404).json({ error: "Cotação não encontrada" });
+    }
+
+    const result = db
+      .prepare(
+        `
+        UPDATE quotes
+        SET
+          status = ?,
+          updated_at = ?
+        WHERE id = ?
+        `
+      )
+      .run("approved", now, id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: "Cotação não encontrada" });
+    }
+
+    writeAuditLog({
+      user: req.user,
+      action: "approve",
+      entity: "quote",
+      entity_id: id,
+      details: {
+        before: previous,
+        after: {
+          ...previous,
+          status: "approved",
+          updated_at: now,
+        },
+      },
+    });
+
+    res.json({
+      ok: true,
+      id,
+      status: "approved",
+    });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+router.post("/:id/export-proposal-docx", requireAuth, async (req, res) => {
+  const id = req.params.id;
+
+  try {
+    const quote = db.prepare(`SELECT * FROM quotes WHERE id = ?`).get(id);
+
+    if (!quote) {
+      return res.status(404).json({ error: "Cotação não encontrada" });
+    }
+
+    const items = db
+      .prepare(`SELECT * FROM quote_items WHERE quote_id = ?`)
+      .all(id);
+
+    quote.items = items;
+
+    const previewData = req.body || {};
+
+    const payload = {
+      ...previewData,
+      quote: {
+        ...(previewData.quote || {}),
+        ...quote,
+        items,
+      },
+    };
+
+    const buffer = await generateProposalDocx(payload);
+
+    const proposalNumber = String(quote.proposal_number || "00000");
+    const filename = `Proposta-Comercial-${proposalNumber}.docx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`
+    );
+
+    return res.send(buffer);
+  } catch (e) {
+    console.error("[export-proposal-docx]", e);
+    return res.status(500).json({ error: e?.message || String(e) });
   }
 });
 

@@ -36,7 +36,6 @@ const safeParseJson = (raw) => {
   }
 };
 
-// ✅ preço efetivo: funciona para PRODUTO, SERVICO e SCM
 const getEffectivePrice = (p) => {
   const direct =
     p?.sale_price ??
@@ -96,14 +95,34 @@ function QuoteItemsManager({
     });
 
     if (changed) onItemsChange(normalized);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const calculateItemTotals = (item) => {
     const quantity = numberParser(item.quantity || 1);
     const unit_price = numberParser(item.unit_price || 0);
-    const updatedItem = { ...item, quantity, unit_price };
-    updatedItem.total_price = quantity * unit_price;
+
+    const discount_type = "percent";
+    const discount_value = numberParser(item.discount_value || 0);
+
+    const total_price_original = quantity * unit_price;
+    let discount_total = total_price_original * (discount_value / 100);
+
+    if (discount_total < 0) discount_total = 0;
+    if (discount_total > total_price_original) discount_total = total_price_original;
+
+    const total_price = total_price_original - discount_total;
+
+    const updatedItem = {
+      ...item,
+      quantity,
+      unit_price,
+      discount_type,
+      discount_value,
+      discount_total,
+      total_price_original,
+      total_price,
+    };
+
     return updatedItem;
   };
 
@@ -130,12 +149,16 @@ function QuoteItemsManager({
       unit: "un",
       quantity: 1,
       unit_price: 0,
+      discount_type: "percent",
+      discount_value: 0,
+      discount_total: 0,
+      total_price_original: 0,
+      total_price: 0,
       taxes: {},
     };
     onItemsChange([...(items || []), calculateItemTotals(baseItem)]);
   };
 
-  // ✅ AQUI: usa getEffectivePrice para qualquer tipo
   const handleProductMultiSelect = (products) => {
     const list = Array.isArray(products) ? products : [];
 
@@ -150,6 +173,11 @@ function QuoteItemsManager({
         unit: product.unit || "un",
         quantity: 1,
         unit_price: getEffectivePrice(product),
+        discount_type: "percent",
+        discount_value: 0,
+        discount_total: 0,
+        total_price_original: 0,
+        total_price: 0,
         taxes: {
           icms: product.icms,
           pis: product.pis,
@@ -186,6 +214,43 @@ function QuoteItemsManager({
     stopEvt(e);
     const k = String(itemKey);
     onItemsChange((items ?? []).filter((it) => keyOf(it) !== k));
+  };
+
+  const buildTotals = (list, titleType) => {
+    const safeList = Array.isArray(list) ? list : [];
+    const subtotalBruto = safeList.reduce(
+      (acc, item) => acc + numberParser(item.total_price_original),
+      0
+    );
+    const discountTotal = safeList.reduce(
+      (acc, item) => acc + numberParser(item.discount_total),
+      0
+    );
+    const subtotal = safeList.reduce(
+      (acc, item) => acc + numberParser(item.total_price),
+      0
+    );
+
+    const taxLabel =
+      titleType === "service" || titleType === "scm" ? "ISSQN" : "ICMS";
+
+    const tax = safeList.reduce((acc, item) => {
+      const taxes = item?.taxes || {};
+      const rate =
+        titleType === "service" || titleType === "scm"
+          ? numberParser(taxes.issqn)
+          : numberParser(taxes.icms);
+
+      return acc + numberParser(item.total_price) * (rate / 100);
+    }, 0);
+
+    return {
+      subtotalBruto,
+      discountTotal,
+      subtotal,
+      tax,
+      taxLabel,
+    };
   };
 
   return (
@@ -227,13 +292,39 @@ function QuoteItemsManager({
 
       <div className="space-y-6">
         {productItems?.length > 0 ? (
-          <ItemTable title="Produtos" items={productItems} onUpdate={updateItem} onDuplicate={duplicateItem} onRemove={removeItem} type="product" />
+          <ItemTable
+            title="Produtos"
+            items={productItems}
+            onUpdate={updateItem}
+            onDuplicate={duplicateItem}
+            onRemove={removeItem}
+            type="product"
+            totals={buildTotals(productItems, "product")}
+          />
         ) : null}
+
         {serviceItems?.length > 0 ? (
-          <ItemTable title="Serviços" items={serviceItems} onUpdate={updateItem} onDuplicate={duplicateItem} onRemove={removeItem} type="service" />
+          <ItemTable
+            title="Serviços"
+            items={serviceItems}
+            onUpdate={updateItem}
+            onDuplicate={duplicateItem}
+            onRemove={removeItem}
+            type="service"
+            totals={buildTotals(serviceItems, "service")}
+          />
         ) : null}
+
         {scmServiceItems?.length > 0 ? (
-          <ItemTable title="Serviços SCM" items={scmServiceItems} onUpdate={updateItem} onDuplicate={duplicateItem} onRemove={removeItem} type="scm" />
+          <ItemTable
+            title="Serviços SCM"
+            items={scmServiceItems}
+            onUpdate={updateItem}
+            onDuplicate={duplicateItem}
+            onRemove={removeItem}
+            type="scm"
+            totals={buildTotals(scmServiceItems, "scm")}
+          />
         ) : null}
       </div>
     </div>

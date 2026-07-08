@@ -4,10 +4,6 @@ import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
 import { cnpjMask, cpfMask } from "@/lib/masks";
 
-/* ============================================================
-   HELPERS
-============================================================ */
-
 const safeText = (t) => (t === 0 ? "0" : t ? String(t) : "");
 const onlyDigits = (s) => String(s || "").replace(/\D/g, "");
 
@@ -42,10 +38,6 @@ function fitLines(doc, lines, width, maxLines) {
   return out;
 }
 
-/* ============================================================
-   EMPRESAS / LOGOS DINÂMICAS
-============================================================ */
-
 const COMPANY_VISUALS = {
   "static:14429925000167": {
     logo: "/brand/logo-fibra.png",
@@ -73,10 +65,6 @@ function getCompanyVisual(company) {
   const id = String(company?.id || company?.company_id || "").trim();
   return COMPANY_VISUALS[id] || COMPANY_VISUALS.default;
 }
-
-/* ============================================================
-   COMPRESSÃO DE IMAGENS
-============================================================ */
 
 async function loadImageElement(url) {
   return await new Promise((resolve) => {
@@ -163,10 +151,6 @@ async function loadBrandImages(company) {
   return { logo, waveHeader, waveFooter };
 }
 
-/* ============================================================
-   FALLBACK EMPRESA
-============================================================ */
-
 const COMPANY_FALLBACK = {
   id: "static:14429925000167",
   razao_social: "Fibra Onda Mais LTDA",
@@ -179,10 +163,6 @@ const COMPANY_FALLBACK = {
   email: "contato@ondamais.ai",
   fone: "0800 042 0900",
 };
-
-/* ============================================================
-   BRAND DRAW
-============================================================ */
 
 function drawBrand(doc, brand, company) {
   const pageW = doc.internal.pageSize.getWidth();
@@ -257,10 +237,6 @@ function drawBrand(doc, brand, company) {
   return topY + 32;
 }
 
-/* ============================================================
-   INFO BOXES
-============================================================ */
-
 function drawInfoBox(doc, { x, y, w, h, title, lines }) {
   doc.setDrawColor(210, 220, 235);
   doc.setFillColor(248, 250, 253);
@@ -288,10 +264,6 @@ function drawInfoBox(doc, { x, y, w, h, title, lines }) {
   });
 }
 
-/* ============================================================
-   NORMALIZAÇÃO
-============================================================ */
-
 function normalizeForPdf({ quote, company, client, vendedor, autor }) {
   const q = quote || {};
   const c = company || COMPANY_FALLBACK;
@@ -304,8 +276,14 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
   const normItems = items.map((it) => {
     const quantity = asNumber(it.quantity ?? it.qtde ?? 1);
     const unit_price = asNumber(it.unit_price ?? it.preco ?? it.preco_base ?? 0);
+    const total_price_original =
+      asNumber(it.total_price_original) || quantity * unit_price;
+
+    const discount_type = safeText(it.discount_type || "value").trim();
+    const discount_value = asNumber(it.discount_value);
+    const discount_total = asNumber(it.discount_total);
     const total_price =
-      it.total_price != null ? asNumber(it.total_price) : quantity * unit_price;
+      asNumber(it.total_price) || total_price_original - discount_total;
 
     return {
       ...it,
@@ -315,6 +293,10 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
       unit: safeText(it.unit ?? it.unidade ?? "un").trim(),
       quantity,
       unit_price,
+      total_price_original,
+      discount_type,
+      discount_value,
+      discount_total,
       total_price,
       isMeasured:
         Boolean(it.isMeasured) ||
@@ -370,10 +352,6 @@ function normalizeForPdf({ quote, company, client, vendedor, autor }) {
   };
 }
 
-/* ============================================================
-   PDF PRINCIPAL
-============================================================ */
-
 function generateOrcamentoPdf(
   doc,
   brand,
@@ -384,7 +362,6 @@ function generateOrcamentoPdf(
   const pageH = doc.internal.pageSize.getHeight();
 
   const contentTop = drawBrand(doc, brand, company);
-
   const headerMargin = 56;
   const footerMargin = 24;
 
@@ -486,6 +463,7 @@ function generateOrcamentoPdf(
       it.unit || "",
       String(it.quantity ?? ""),
       formatCurrency(it.unit_price || 0),
+      formatCurrency(it.discount_total || 0),
       it.isMeasured ? "" : formatCurrency(it.total_price || 0),
     ]);
 
@@ -550,7 +528,7 @@ function generateOrcamentoPdf(
     cursorY += 6;
 
     autoTable(doc, {
-      head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Total"]],
+      head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Desc.", "Total"]],
       body: makeRows(list),
       startY: cursorY,
       margin: {
@@ -617,18 +595,12 @@ function generateOrcamentoPdf(
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
   };
 
-  /* ============================================================
-     PROPOSTA: BLOCOS ANTES DOS ITENS
-  ============================================================ */
   if (documentType === "proposta_comercial") {
     drawTextBlock("OBJETO", quote.objeto);
     drawTextBlock("MISSÃO", quote.missao);
     drawTextBlock("ESCOPO TÉCNICO", quote.escopo_tecnico);
   }
 
-  /* ============================================================
-     ITENS
-  ============================================================ */
   drawTable("PRODUTOS", produtos, "SUBTOTAL PRODUTOS");
   drawTable("SERVIÇOS", servicos, "SUBTOTAL SERVIÇOS");
   drawTable("SERVIÇOS SCM", scm, "SUBTOTAL SERVIÇOS SCM");
@@ -638,8 +610,8 @@ function generateOrcamentoPdf(
     cursorY += 6;
 
     autoTable(doc, {
-      head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Total"]],
-      body: [["", "Nenhum item adicionado", "", "", "", ""]],
+      head: [["Cód.", "Descrição", "Un", "Qtd", "Vlr Unit.", "Desc.", "Total"]],
+      body: [["", "Nenhum item adicionado", "", "", "", "", ""]],
       startY: cursorY,
       margin: {
         left: margin,
@@ -666,9 +638,6 @@ function generateOrcamentoPdf(
     cursorY = (doc.lastAutoTable?.finalY || cursorY) + 8;
   }
 
-  /* ============================================================
-     PROPOSTA: BLOCOS DEPOIS DOS ITENS
-  ============================================================ */
   if (documentType === "proposta_comercial") {
     drawTextBlock("SEGMENTAÇÃO", quote.segmentacao);
     drawTextBlock("INVESTIMENTO", quote.investimento_texto);
@@ -698,11 +667,28 @@ function generateOrcamentoPdf(
     0
   );
 
+  const subtotalBruto = items.reduce(
+    (acc, it) =>
+      acc +
+      asNumber(
+        it.total_price_original ||
+          asNumber(it.quantity) * asNumber(it.unit_price)
+      ),
+    0
+  );
+
+  const descontoTotal = items.reduce(
+    (acc, it) => acc + asNumber(it.discount_total),
+    0
+  );
+
   const totalGeral = totalProdutos + totalServicos + totalScm;
 
+  const rightTableW = 64;
+  const gap = 8;
   const leftX = margin;
-  const leftW = 118;
-  const rightX = pageW - 64 - margin;
+  const rightX = pageW - rightTableW - margin;
+  const leftW = rightX - leftX - gap;
 
   const infoLines = [];
 
@@ -738,35 +724,46 @@ function generateOrcamentoPdf(
     if (additionalInfo) infoLines.push(`Informações adicionais: ${additionalInfo}`);
   }
 
-  let infoStartY = sectionY;
+  const infoBodyText = infoLines.length
+    ? infoLines.join("\n\n")
+    : "Sem informações adicionais.";
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text("INFORMAÇÕES ADICIONAIS", leftX, infoStartY);
-
-  let infoTextY = infoStartY + 6;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-
-  const wrappedInfo = [];
-  infoLines.forEach((line) => {
-    const chunk = doc.splitTextToSize(String(line || ""), leftW);
-    chunk.forEach((c) => wrappedInfo.push(c));
-    wrappedInfo.push("");
-  });
-
-  if (wrappedInfo.length) {
-    doc.text(wrappedInfo, leftX, infoTextY);
-  }
-
-  const infoHeight = wrappedInfo.length ? wrappedInfo.length * 4 + 8 : 12;
+  doc.text("INFORMAÇÕES ADICIONAIS", leftX, sectionY);
 
   autoTable(doc, {
-    startY: sectionY,
+    startY: sectionY + 4,
+    body: [[infoBodyText]],
+    margin: { left: leftX, right: pageW - leftX - leftW },
+    styles: {
+      fontSize: 8.6,
+      cellPadding: 3,
+      lineColor: [225, 230, 238],
+      lineWidth: 0.15,
+      textColor: [30, 30, 30],
+      overflow: "linebreak",
+      valign: "top",
+    },
+    bodyStyles: {
+      fillColor: [255, 255, 255],
+    },
+    columnStyles: {
+      0: { cellWidth: leftW },
+    },
+    theme: "grid",
+  });
+
+  const infoFinalY = doc.lastAutoTable?.finalY || sectionY + 10;
+
+  autoTable(doc, {
+    startY: sectionY + 4,
     body: [
       ["TOTAL PRODUTOS", formatCurrency(totalProdutos)],
       ["TOTAL SERVIÇOS", formatCurrency(totalServicos)],
       ["TOTAL SERVIÇOS SCM", formatCurrency(totalScm)],
+      ["SUBTOTAL BRUTO", formatCurrency(subtotalBruto)],
+      ["DESCONTO TOTAL", formatCurrency(descontoTotal)],
       ["TOTAL GERAL", formatCurrency(totalGeral)],
     ],
     margin: { left: rightX, right: margin },
@@ -786,7 +783,7 @@ function generateOrcamentoPdf(
       1: { halign: "right", cellWidth: 28 },
     },
     didParseCell: (data) => {
-      if (data.row.index === 3) {
+      if (data.row.index === 5) {
         data.cell.styles.fillColor = [30, 41, 59];
         data.cell.styles.textColor = [255, 255, 255];
         data.cell.styles.fontStyle = "bold";
@@ -795,12 +792,10 @@ function generateOrcamentoPdf(
     theme: "grid",
   });
 
-  return Math.max(infoStartY + infoHeight, doc.lastAutoTable.finalY || sectionY);
-}
+  const totalsFinalY = doc.lastAutoTable?.finalY || sectionY + 10;
 
-/* ============================================================
-   EXPORT
-============================================================ */
+  return Math.max(infoFinalY, totalsFinalY);
+}
 
 export const generateQuotePDF = async (payload, options = {}) => {
   const { quote, client, company, vendedor, autor } = normalizeForPdf(payload);
